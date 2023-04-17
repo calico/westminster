@@ -15,19 +15,15 @@
 # =========================================================================
 from optparse import OptionParser, OptionGroup
 import glob
-import json
 import pickle
 import pdb
 import os
-import sys
 
 import h5py
 import numpy as np
-import pandas as pd
 
 import slurm
 
-from westminster.stats import stat_tests
 from westminster.multi import collect_sad, nonzero_h5
 
 """
@@ -115,9 +111,6 @@ def main():
   fold_options.add_option('-q', dest='queue',
       default='geforce',
       help='SLURM queue on which to run the jobs [Default: %default]')
-  # fold_options.add_option('-r', dest='restart',
-  #     default=False, action='store_true',
-  #     help='Restart a partially completed job [Default: %default]')
   parser.add_option_group(fold_options)
 
   (options, args) = parser.parse_args()
@@ -317,7 +310,7 @@ def main():
   # fit classifiers
   ################################################################
 
-  cmd_base = 'basenji_bench_classify.py -i 100 -p 2 -r 44 -s'
+  cmd_base = 'westminster_classify.py -i 100 -r 44 -s'
   cmd_base += ' --msl %d' % options.msl
 
   if options.class_targets_file is not None:
@@ -367,7 +360,13 @@ def main():
   slurm.multi_run(jobs, verbose=True)
 
 
-def ensemble_sad_h5(ensemble_h5_file, scores_files):
+def ensemble_sad_h5(ensemble_h5_file: str, scores_files):
+  """Ensemble SAD scores from multiple files into a single file.
+  
+  Args:
+    ensemble_h5_file (str): ensemble score HDF5.
+    scores_files ([str]): list of replicate score HDFs.
+  """
   # open ensemble
   ensemble_h5 = h5py.File(ensemble_h5_file, 'w')
 
@@ -405,10 +404,16 @@ def ensemble_sad_h5(ensemble_h5_file, scores_files):
   ensemble_h5.close()
 
 
-def split_sad(it_out_dir, posneg, vcf_dir, sad_stats):
+def split_sad(it_out_dir: str, posneg: str, vcf_dir: str, sad_stats):
   """Split merged VCF predictions in HDF5 into tissue-specific
-     predictions in HDF5."""
-
+     predictions in HDF5.
+     
+     Args:
+       it_out_dir (str): output directory for iteration.
+       posneg (str): 'pos' or 'neg'.
+       vcf_dir (str): directory containing tissue-specific VCFs.
+       sad_stats ([str]]): list of SAD stats.
+  """
   merge_h5_file = '%s/merge_%s/sad.h5' % (it_out_dir, posneg)
   merge_h5 = h5py.File(merge_h5_file, 'r')
 
