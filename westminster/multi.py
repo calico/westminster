@@ -14,6 +14,7 @@
 # =========================================================================
 
 import h5py
+import os
 import numpy as np
 
 
@@ -92,7 +93,12 @@ def collect_sad(out_dir: str, num_jobs: int):
           final_strings[key] += list(job_h5_open[key])
         else:
           job_variants = job_h5_open[key].shape[0]
-          final_h5_open[key][vi:vi+job_variants] = job_h5_open[key]
+          try:
+            final_h5_open[key][vi:vi+job_variants] = job_h5_open[key]
+          except TypeError as e:
+            print(e)
+            print(f'{job_h5_file} ${key} has the wrong shape. Remove this file and rerun')
+            exit()
 
     vi += job_variants
     job_h5_open.close()
@@ -105,7 +111,7 @@ def collect_sad(out_dir: str, num_jobs: int):
   final_h5_open.close()
 
 
-def nonzero_h5(h5_file: str, stat_keys: [str]):
+def nonzero_h5(h5_file: str, stat_keys):
   """
   Verify the HDF5 exists, and there are nonzero values
   for each stat key given.
