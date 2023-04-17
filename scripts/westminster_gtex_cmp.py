@@ -9,7 +9,7 @@ import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.stats import combine_pvalues, pearsonr, ttest_rel, wilcoxon
+from scipy.stats import wilcoxon
 import seaborn as sns
 from tabulate import tabulate
 
@@ -73,10 +73,6 @@ def main():
 
     # determine tissues
     tissue_bench_dirs0 = glob.glob('%s/*_class-%s' % (bench_dirs[0], sad_stats[0]))
-    # if len(tissue_bench_dirs0) == 0:
-    #     # TEMP during transition
-    #     tissue_bench_dirs0 = glob.glob('%s/*_class' % bench_dirs[0])
-    # tissues = [tbd.split('/')[-1].replace('_class','') for tbd in tissue_bench_dirs0]
     tissue_class_dirs = [tbd.split('/')[-1] for tbd in tissue_bench_dirs0]
     tissues = [tcd[:tcd.find('_class')] for tcd in tissue_class_dirs]
 
@@ -98,10 +94,6 @@ def main():
             bench_aurocs = []
             for i in range(num_benches):
                 tissue_class_dir_i = '%s/%s_class-%s' % (bench_dirs[i],tissue,sad_stats[i])
-                if not os.path.isdir(tissue_class_dir_i):
-                    # TEMP during transition
-                    tissue_class_dir_i = '%s/%s_class' % (bench_dirs[i],tissue)
-
                 try:
                     tpr_mean = np.load('%s/tpr_mean.npy' % tissue_class_dir_i)
                     fpr_mean = np.load('%s/fpr_mean.npy' % tissue_class_dir_i)
@@ -125,7 +117,6 @@ def main():
             plt.tight_layout()                                                  
             plt.savefig('%s/roc_full.pdf' % tissue_out_dir)
             plt.close()
-
 
             # scatter plot versions' fold AUROCss
             for i in range(num_benches):
@@ -162,6 +153,7 @@ def main():
                         df_mwp.append(0)
                         df_tp.append(0)
 
+    # make comparison table
     df_cmp = pd.DataFrame({
         'tissue':df_tissues,
         'variants':df_variants,
@@ -214,8 +206,6 @@ def main():
             plt.savefig('%s/auroc_%s_%s.pdf' % (options.out_dir, options.labels[i], options.labels[j]))
             plt.close()
 
-            # wilcoxon_p = combine_pvalues(df_cmp_ij.wilcoxon)[1]
-            # ttest_p = combine_pvalues(df_cmp_ij.ttest)[1]
             wilcoxon_p = wilcoxon(df_cmp_ij.auroc1, df_cmp_ij.auroc2,
                                   alternative=options.alternative)[1]
             ttest_p = ttest_alt(df_cmp_ij.auroc1, df_cmp_ij.auroc2,
@@ -225,23 +215,6 @@ def main():
             print('%s AUROC: %.4f' % (options.labels[j], df_cmp_ij.auroc2.mean()))
             print('Wilcoxon p: %.3g' % wilcoxon_p)
             print('T-test p:   %.3g' % ttest_p)
-
-
-def ttest_alt(a, b, alternative='two-sided'):
-    tt, tp = ttest_rel(a, b)
-
-    if alternative == 'greater':
-        if tt > 0:
-            tp = 1 - (1-tp)/2
-        else:
-            tp /= 2
-    elif alternative == 'less':
-        if tt <= 0:
-            tp /= 2
-        else:
-            tp = 1 - (1-tp)/2
-
-    return tt, tp
 
 
 ################################################################################
