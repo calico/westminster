@@ -14,8 +14,6 @@ from sklearn.linear_model import RidgeClassifier
 from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.model_selection import KFold
 
-from basenji.dna_io import dna_1hot
-
 '''
 westminster_classify.py
 
