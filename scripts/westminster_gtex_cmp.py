@@ -13,6 +13,8 @@ from scipy.stats import wilcoxon
 import seaborn as sns
 from tabulate import tabulate
 
+from westminster.stats import ttest_alt
+
 '''
 westminster_gtex_cmp.py
 
