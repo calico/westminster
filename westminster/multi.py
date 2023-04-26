@@ -19,14 +19,11 @@ import numpy as np
 
 
 def collect_sad(out_dir: str, num_jobs: int):
-  """
-  Collect parallel SAD jobs' output into one HDF5.
+  """Collect parallel SAD jobs' output into one HDF5.
 
   Args:
-    out_dir (:obj:`str`):
-      Output directory.
-    num_jobs (:obj:`int`):
-      Number of jobs to combine results from.
+    out_dir (str): Output directory.
+    num_jobs (int): Number of jobs to combine results from.
   """
   h5f_name = 'sad.h5'
 
@@ -112,15 +109,12 @@ def collect_sad(out_dir: str, num_jobs: int):
 
 
 def nonzero_h5(h5_file: str, stat_keys):
-  """
-  Verify the HDF5 exists, and there are nonzero values
-  for each stat key given.
+  """Verify the HDF5 exists, and there are nonzero values
+    for each stat key given.
 
   Args:
-    h5_file (:obj:`str`):
-      HDF5 file name.
-    stat_keys (:obj:`[str]`):
-      List of SNP stat keys.
+    h5_file (str): HDF5 file name.
+    stat_keys ([str]): List of SNP stat keys.
   """
   if os.path.isfile(h5_file):
     try:
