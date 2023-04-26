@@ -308,7 +308,6 @@ def main():
 
   ################################################################
   # fit classifiers
-  ################################################################
 
   cmd_base = 'westminster_classify.py -i 100 -r 44 -s'
   cmd_base += ' --msl %d' % options.msl
@@ -356,6 +355,27 @@ def main():
             queue='standard', cpu=2,
             mem=22000, time='1-0:0:0')
         jobs.append(j)
+
+  slurm.multi_run(jobs, verbose=True)
+
+  ################################################################
+  # coefficient analysis
+
+  cmd_base = 'westminster_gtex_coef.py -g %s' % options.gtex_vcf_dir
+
+  jobs = []
+  for ci in range(options.crosses):
+    for fi in range(num_folds):
+      it_dir = '%s/f%dc%d' % (exp_dir, fi, ci)
+      it_out_dir = '%s/%s' % (it_dir, gtex_out_dir)
+      coef_out_dir = '%s/coef' % it_out_dir
+
+      cmd_coef = f'{cmd_base} -o {coef_out_dir} {it_out_dir}'
+      j = slurm.Job(cmd_coef, 'coef',
+            f'{coef_out_dir}.out', f'{coef_out_dir}.err',
+            queue='standard', cpu=2,
+            mem=22000, time='12:0:0')
+      jobs.append(j)
 
   slurm.multi_run(jobs, verbose=True)
 
