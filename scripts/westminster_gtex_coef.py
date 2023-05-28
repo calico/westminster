@@ -10,6 +10,9 @@ import pandas as pd
 from scipy.stats import spearmanr
 from sklearn.metrics import roc_auc_score
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 '''
 westminster_gtex_coef.py
 
@@ -23,9 +26,17 @@ and coefficient correlations.
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument('-o', '--out_dir',
-                      default='coef_out')
+                      default='coef_out',
+                      help='Output directory for tissue metrics')
   parser.add_argument('-g', '--gtex_vcf_dir',
-                      default='/home/drk/seqnn/data/gtex_fine/susie_pip90')
+                      default='/home/drk/seqnn/data/gtex_fine/susie_pip90',
+                      help='GTEx VCF directory')
+  parser.add_argument('-p', '--plot',
+                      action='store_true',
+                      help='Generate tissue prediction plots')
+  parser.add_argument('-s', '--snp_stat',
+                      default='SAD',
+                      help='SNP statistic. [Default: %(default)s]')
   parser.add_argument('-v', '--verbose',
                       action='store_true')
   parser.add_argument('gtex_dir')                      
@@ -74,8 +85,8 @@ def main():
     if eqtl_df is not None:
       # read model predictions
       gtex_scores_file = f'{args.gtex_dir}/{tissue}_pos/sad.h5'
-      variant_scores = read_scores(gtex_scores_file, keyword,
-                                   eqtl_df, verbose=args.verbose)
+      variant_scores = read_scores(gtex_scores_file, keyword, eqtl_df,
+                                   args.snp_stat, verbose=args.verbose)
       variant_scores = variant_scores[eqtl_df.consistent]
 
       # compute AUROCs
@@ -85,6 +96,24 @@ def main():
       # compute PearsonR
       variant_coef = eqtl_df[eqtl_df.consistent].coef
       coef_r = spearmanr(variant_coef, variant_scores)[0]
+
+      if args.plot:
+        # write table
+        scatter_df = pd.DataFrame({
+          'variant': eqtl_df[eqtl_df.consistent].variant,
+          'coef': variant_coef,
+          'pred': variant_scores
+        })
+        scatter_df.to_csv(f'{args.out_dir}/{tissue}.tsv',
+                          index=False, sep='\t')
+
+        # scatterplot
+        plt.figure(figsize=(6,6))
+        sns.scatterplot(x=variant_coef, y=variant_scores,
+                        alpha=0.5, s=20)
+        plt.gca().set_xlabel('eQTL coefficient')
+        plt.gca().set_ylabel('Variant effect prediction')
+        plt.savefig(f'{args.out_dir}/{tissue}.png', dpi=300)
 
       # save
       metrics_tissue.append(tissue)
