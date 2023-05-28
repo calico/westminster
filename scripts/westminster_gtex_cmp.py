@@ -51,7 +51,7 @@ def main():
         os.mkdir(options.out_dir)
 
     num_benches = len(bench_dirs)
-    sad_stats = [stat.upper() for stat in options.stats.split(',')]
+    sad_stats = [stat for stat in options.stats.split(',')]
     if len(sad_stats) == 1:
         sad_stats = sad_stats*num_benches
 
@@ -85,7 +85,7 @@ def main():
 
         # count variants
         with h5py.File('%s/%s_pos/sad.h5' % (bench_dirs[0],tissue), 'r') as tissue_sad_h5:
-            sad_stat_up = sad_stats[0].upper()
+            sad_stat_up = sad_stats[0]
             num_variants = tissue_sad_h5[sad_stat_up].shape[0]
 
         # filter variants
@@ -176,47 +176,50 @@ def main():
     print(table_cmp)
     print(border)
 
-    # scatter plot pairs
-    for i in range(num_benches):
-        for j in range(i+1, num_benches):
-            mask_ij = (df_cmp.label1 == options.labels[i]) & (df_cmp.label2 == options.labels[j])
-            df_cmp_ij = df_cmp[mask_ij]
+    if num_benches == 1:
+        print('%s AUROC: %.4f' % (options.labels[0], np.mean(bench_aurocs)))
+    else:
+        # scatter plot pairs
+        for i in range(num_benches):
+            for j in range(i+1, num_benches):
+                mask_ij = (df_cmp.label1 == options.labels[i]) & (df_cmp.label2 == options.labels[j])
+                df_cmp_ij = df_cmp[mask_ij]
 
-            hue_var = None
-            if options.plot_hue:
-                hue_var = 'variants'
+                hue_var = None
+                if options.plot_hue:
+                    hue_var = 'variants'
 
-            plt.figure(figsize=(6,6))
-            sns.scatterplot(x='auroc1', y='auroc2', data=df_cmp_ij,
-                            hue=hue_var, linewidth=0, alpha=0.8)
-            ax = plt.gca()
+                plt.figure(figsize=(6,6))
+                sns.scatterplot(x='auroc1', y='auroc2', data=df_cmp_ij,
+                                hue=hue_var, linewidth=0, alpha=0.8)
+                ax = plt.gca()
 
-            vmin = min(df_cmp_ij.auroc1.min(), df_cmp_ij.auroc2.min())
-            vmax = max(df_cmp_ij.auroc1.max(), df_cmp_ij.auroc2.max())
-            ax.plot([vmin,vmax], [vmin,vmax], linestyle='--', color='black')
+                vmin = min(df_cmp_ij.auroc1.min(), df_cmp_ij.auroc2.min())
+                vmax = max(df_cmp_ij.auroc1.max(), df_cmp_ij.auroc2.max())
+                ax.plot([vmin,vmax], [vmin,vmax], linestyle='--', color='black')
 
-            eps = 0.05
-            ax.text(1-eps, eps, 'Mean %.3f'%df_cmp_ij.auroc1.mean(),
-                horizontalalignment='right', transform=ax.transAxes)
-            ax.text(eps, 1-eps, 'Mean %.3f'%df_cmp_ij.auroc2.mean(),
-                verticalalignment='top', transform=ax.transAxes)
+                eps = 0.05
+                ax.text(1-eps, eps, 'Mean %.3f'%df_cmp_ij.auroc1.mean(),
+                    horizontalalignment='right', transform=ax.transAxes)
+                ax.text(eps, 1-eps, 'Mean %.3f'%df_cmp_ij.auroc2.mean(),
+                    verticalalignment='top', transform=ax.transAxes)
 
-            ax.set_xlabel('%s AUROC' % options.labels[i])
-            ax.set_ylabel('%s AUROC' % options.labels[j])
-            sns.despine()
-            plt.tight_layout()
-            plt.savefig('%s/auroc_%s_%s.pdf' % (options.out_dir, options.labels[i], options.labels[j]))
-            plt.close()
+                ax.set_xlabel('%s AUROC' % options.labels[i])
+                ax.set_ylabel('%s AUROC' % options.labels[j])
+                sns.despine()
+                plt.tight_layout()
+                plt.savefig('%s/auroc_%s_%s.pdf' % (options.out_dir, options.labels[i], options.labels[j]))
+                plt.close()
 
-            wilcoxon_p = wilcoxon(df_cmp_ij.auroc1, df_cmp_ij.auroc2,
-                                  alternative=options.alternative)[1]
-            ttest_p = ttest_alt(df_cmp_ij.auroc1, df_cmp_ij.auroc2,
-                                alternative=options.alternative)[1]
-            print('')
-            print('%s AUROC: %.4f' % (options.labels[i], df_cmp_ij.auroc1.mean()))
-            print('%s AUROC: %.4f' % (options.labels[j], df_cmp_ij.auroc2.mean()))
-            print('Wilcoxon p: %.3g' % wilcoxon_p)
-            print('T-test p:   %.3g' % ttest_p)
+                wilcoxon_p = wilcoxon(df_cmp_ij.auroc1, df_cmp_ij.auroc2,
+                                    alternative=options.alternative)[1]
+                ttest_p = ttest_alt(df_cmp_ij.auroc1, df_cmp_ij.auroc2,
+                                    alternative=options.alternative)[1]
+                print('')
+                print('%s AUROC: %.4f' % (options.labels[i], df_cmp_ij.auroc1.mean()))
+                print('%s AUROC: %.4f' % (options.labels[j], df_cmp_ij.auroc2.mean()))
+                print('Wilcoxon p: %.3g' % wilcoxon_p)
+                print('T-test p:   %.3g' % ttest_p)
 
 
 ################################################################################
