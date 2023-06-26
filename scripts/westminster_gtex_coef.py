@@ -35,7 +35,7 @@ def main():
                       action='store_true',
                       help='Generate tissue prediction plots')
   parser.add_argument('-s', '--snp_stat',
-                      default='SAD',
+                      default='logSAD',
                       help='SNP statistic. [Default: %(default)s]')
   parser.add_argument('-v', '--verbose',
                       action='store_true')
@@ -75,7 +75,8 @@ def main():
   # 'Cells_Cultured_fibroblasts': 'fibroblast',
  
   metrics_tissue = []
-  metrics_auroc = []
+  metrics_sauroc = []
+  metrics_cauroc = []
   metrics_r = []
   for tissue, keyword in tissue_keywords.items():
     if args.verbose: print(tissue)
@@ -89,13 +90,17 @@ def main():
                                    args.snp_stat, verbose=args.verbose)
       variant_scores = variant_scores[eqtl_df.consistent]
 
-      # compute AUROCs
+      # compute sign AUROCs
       variant_sign = eqtl_df[eqtl_df.consistent].sign
       sign_auroc = roc_auc_score(variant_sign, variant_scores)
 
-      # compute PearsonR
+      # compute SpearmanR
       variant_coef = eqtl_df[eqtl_df.consistent].coef
       coef_r = spearmanr(variant_coef, variant_scores)[0]
+
+      # classification AUROC
+      class_auroc = classify_auroc(gtex_scores_file, keyword, variant_scores,
+                                   args.snp_stat)
 
       if args.plot:
         # write table
@@ -117,7 +122,8 @@ def main():
 
       # save
       metrics_tissue.append(tissue)
-      metrics_auroc.append(sign_auroc)
+      metrics_sauroc.append(sign_auroc)
+      metrics_cauroc.append(class_auroc)
       metrics_r.append(coef_r)
 
       if args.verbose: print('')
@@ -125,15 +131,17 @@ def main():
   # save metrics
   metrics_df = pd.DataFrame({
       'tissue': metrics_tissue,
-      'auroc': metrics_auroc,
-      'spearmanr': metrics_r
+      'auroc_sign': metrics_sauroc,
+      'spearmanr': metrics_r,
+      'auroc_class': metrics_cauroc
   })
   metrics_df.to_csv(f'{args.out_dir}/metrics.tsv',
                     sep='\t', index=False, float_format='%.4f')
 
   # summarize
-  print('AUROC: %.4f' % np.mean(metrics_df.auroc))
-  print('SpearmanR: %.4f' % np.mean(metrics_df.spearmanr))
+  print('Sign AUROC:  %.4f' % np.mean(metrics_df.auroc_sign))
+  print('SpearmanR:   %.4f' % np.mean(metrics_df.spearmanr))
+  print('Class AUROC: %.4f' % np.mean(metrics_df.auroc_class))
 
 
 def read_eqtl(tissue: str, gtex_vcf_dir: str, pip_t: float=0.9):
@@ -240,6 +248,48 @@ def read_scores(gtex_scores_file: str,
   variant_scores[sad_flip] = -variant_scores[sad_flip]
 
   return variant_scores
+
+
+def classify_auroc(gtex_scores_file: str,
+                   keyword: str,
+                   pos_scores: np.array,
+                   score_key: str='SAD',
+                   verbose: bool=False):
+  """Read eQTL RNA predictions for the given tissue.
+  
+  Args:
+    gtex_scores_file (str): Variant scores HDF5.
+    tissue_keyword (str): tissue keyword, for matching GTEx targets
+    pos_scores (np.array): eQTL predictions
+    score_key (str): score key in HDF5 file
+    verbose (bool): Print matching targets.
+
+  Returns:
+    np.array: eQTL predictions
+  """
+  gtex_nscores_file = gtex_scores_file.replace('_pos','_neg')
+  with h5py.File(gtex_nscores_file, 'r') as gtex_scores_h5:   
+    # determine matching GTEx targets
+    target_ids = np.array([ref.decode('UTF-8') for ref in gtex_scores_h5['target_ids']])
+    target_labels = np.array([ref.decode('UTF-8') for ref in gtex_scores_h5['target_labels']])
+    match_tis = []
+    for ti in range(len(target_ids)):
+      if target_ids[ti].find('GTEX') != -1 and target_labels[ti].find(keyword) != -1:
+        if not keyword == 'blood' or target_labels[ti].find('vessel') == -1:
+          if verbose:
+            print(ti, target_ids[ti], target_labels[ti])
+          match_tis.append(ti)
+    match_tis = np.array(match_tis)
+    
+    # mean across targets
+    neg_scores = gtex_scores_h5[score_key][...,match_tis].mean(axis=-1, dtype='float32')
+    neg_scores = np.arcsinh(neg_scores)
+
+  pos_scores = np.abs(pos_scores)
+  neg_scores = np.abs(neg_scores)
+  X = np.concatenate([pos_scores, neg_scores])
+  y = np.concatenate([np.ones_like(pos_scores), np.zeros_like(neg_scores)])
+  return roc_auc_score(y, X)
 
 
 ################################################################################
