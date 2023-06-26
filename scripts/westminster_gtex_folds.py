@@ -24,7 +24,7 @@ import numpy as np
 
 import slurm
 
-from westminster.multi import collect_sad, nonzero_h5
+from westminster.multi import collect_scores, nonzero_h5
 
 """
 westminster_gtex_folds.py
@@ -68,9 +68,8 @@ def main():
   sad_options.add_option('--threads', dest='threads',
       default=False, action='store_true',
       help='Run CPU math and output in a separate thread [Default: %default]')
-  sad_options.add_option('-u', dest='penultimate',
-      default=False, action='store_true',
-      help='Compute SED in the penultimate layer [Default: %default]')
+  sad_options.add_option('-u', dest='untransform_old',
+      default=False, action='store_true')
   parser.add_option_group(sad_options)
 
   # classify
@@ -241,12 +240,12 @@ def main():
       # collect negatives
       neg_out_dir = '%s/merge_neg' % it_out_dir
       if not os.path.isfile('%s/sad.h5' % neg_out_dir):
-        collect_sad(neg_out_dir, options.processes)
+        collect_scores(neg_out_dir, options.processes)
 
       # collect positives
       pos_out_dir = '%s/merge_pos' % it_out_dir
       if not os.path.isfile('%s/sad.h5' % pos_out_dir):
-        collect_sad(pos_out_dir, options.processes)
+        collect_scores(pos_out_dir, options.processes)
 
   ################################################################
   # split study/tissue variants

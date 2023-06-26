@@ -13,20 +13,20 @@
 # limitations under the License.
 # =========================================================================
 
+import pdb
+
 import h5py
 import os
 import numpy as np
 
 
-def collect_sad(out_dir: str, num_jobs: int):
+def collect_scores(out_dir: str, num_jobs: int, h5f_name: str='sad.h5'):
   """Collect parallel SAD jobs' output into one HDF5.
 
   Args:
     out_dir (str): Output directory.
     num_jobs (int): Number of jobs to combine results from.
   """
-  h5f_name = 'sad.h5'
-
   # count variants
   num_variants = 0
   for pi in range(num_jobs):
@@ -94,7 +94,7 @@ def collect_sad(out_dir: str, num_jobs: int):
             final_h5_open[key][vi:vi+job_variants] = job_h5_open[key]
           except TypeError as e:
             print(e)
-            print(f'{job_h5_file} ${key} has the wrong shape. Remove this file and rerun')
+            print(f'{job_h5_file} {key} has the wrong shape. Remove this file and rerun')
             exit()
 
     vi += job_variants
