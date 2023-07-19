@@ -167,7 +167,7 @@ def read_eqtl(tissue: str, gtex_vcf_dir: str, pip_t: float=0.9):
     eqtl_df = pd.DataFrame({
       'variant': df_causal.variant,
       'gene': [trim_dot(gene_id) for gene_id in df_causal.gene],
-      'coef': df_causal.beta_marginal,
+      'coef': df_causal.beta_posterior,
       'allele1': df_causal.allele1
     })
   return eqtl_df
