@@ -170,23 +170,23 @@ def read_eqtl(tissue: str, gtex_vcf_dir: str, pip_t: float=0.9):
   # remove variants with inconsistent signs
   variant_a1 = {}
   variant_sign = {}
-  variant_z = {}
+  variant_beta = {}
   inconsistent_variants = set()
   for variant in df_causal.itertuples():
     vid = variant.variant
-    vsign = variant.z > 0
+    vsign = variant.beta_posterior > 0
 
     variant_a1[vid] = variant.allele1
-    variant_z.setdefault(vid,[]).append(variant.z)
+    variant_beta.setdefault(vid,[]).append(variant.beta_posterior)
     if vid in variant_sign:
       if variant_sign[vid] != vsign:
         inconsistent_variants.add(vid)
     else:
       variant_sign[vid] = vsign
       
-  # average z-scores across genes
-  for vid in variant_z:
-    variant_z[vid] = np.mean(variant_z[vid])
+  # average beta's across genes
+  for vid in variant_beta:
+    variant_beta[vid] = np.mean(variant_beta[vid])
 
   # order variants
   tissue_vcf_file = f'{gtex_vcf_dir}/{tissue}_pos.vcf'
@@ -199,7 +199,7 @@ def read_eqtl(tissue: str, gtex_vcf_dir: str, pip_t: float=0.9):
     # create dataframe
     eqtl_df = pd.DataFrame({
       'variant': pred_variants,
-      'coef': [variant_z[vid] for vid in pred_variants],
+      'coef': [variant_beta[vid] for vid in pred_variants],
       'sign': [variant_sign[vid] for vid in pred_variants],
       'allele': [variant_a1[vid] for vid in pred_variants],
       'consistent': consistent_mask
