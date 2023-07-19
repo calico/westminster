@@ -376,6 +376,16 @@ def main():
             mem=22000, time='12:0:0')
       jobs.append(j)
 
+  # ensemble
+  it_out_dir = f'{exp_dir}/ensemble/{gtex_out_dir}'
+  coef_out_dir = '%s/coef' % it_out_dir
+  cmd_coef = f'{cmd_base} -o {coef_out_dir} {it_out_dir}'
+  j = slurm.Job(cmd_coef, 'coef',
+        f'{coef_out_dir}.out', f'{coef_out_dir}.err',
+        queue='standard', cpu=2,
+        mem=22000, time='12:0:0')
+  jobs.append(j)
+
   slurm.multi_run(jobs, verbose=True)
 
 
