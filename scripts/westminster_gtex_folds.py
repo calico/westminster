@@ -39,41 +39,30 @@ def main():
   usage = 'usage: %prog [options] <params_file> <data_dir>'
   parser = OptionParser(usage)
 
-  # sad options
-  sad_options = OptionGroup(parser, 'basenji_sad.py options')
-  sad_options.add_option('-f', dest='genome_fasta',
+  # snp options
+  snp_options = OptionGroup(parser, 'hound_snp.py options')
+  snp_options.add_option('-f', dest='genome_fasta',
       default='%s/data/hg38.fa' % os.environ['BASENJIDIR'],
       help='Genome FASTA for sequences [Default: %default]')
-  sad_options.add_option('-n', dest='norm_file',
-      default=None,
-      help='Normalize SAD scores')
-  sad_options.add_option('-o',dest='out_dir',
+  snp_options.add_option('-o',dest='out_dir',
       default='gtex',
       help='Output directory for tables and plots [Default: %default]')
-  sad_options.add_option('--rc', dest='rc',
+  snp_options.add_option('--rc', dest='rc',
       default=False, action='store_true',
       help='Average forward and reverse complement predictions [Default: %default]')
-  sad_options.add_option('--shifts', dest='shifts',
+  snp_options.add_option('--shifts', dest='shifts',
       default='0', type='str',
       help='Ensemble prediction shifts [Default: %default]')
-  sad_options.add_option('--stats', dest='sad_stats',
+  snp_options.add_option('--stats', dest='sad_stats',
       default='SAD',
       help='Comma-separated list of stats to save. [Default: %default]')
-  sad_options.add_option('-t', dest='targets_file',
+  snp_options.add_option('-t', dest='targets_file',
       default=None, type='str',
       help='File specifying target indexes and labels in table format')
-  sad_options.add_option('--ti', dest='track_indexes',
-      default=None, type='str',
-      help='Comma-separated list of target indexes to output BigWig tracks')
-  sad_options.add_option('--threads', dest='threads',
-      default=False, action='store_true',
-      help='Run CPU math and output in a separate thread [Default: %default]')
-  sad_options.add_option('-u', dest='untransform_old',
-      default=False, action='store_true')
-  parser.add_option_group(sad_options)
+  parser.add_option_group(snp_options)
 
   # classify
-  class_options = OptionGroup(parser, 'basenji_bench_classify.py options')
+  class_options = OptionGroup(parser, 'westminster_classify.py options')
   class_options.add_option('--cn', dest='class_name',
       default=None,
       help='Classifier name extension [Default: %default]')  
@@ -185,7 +174,7 @@ def main():
       options_pkl.close()
 
       # create base fold command
-      cmd_fold = '%s time basenji_sad.py %s %s %s' % (
+      cmd_fold = '%s time hound_snp.py %s %s %s' % (
         cmd_base, options_pkl_file, params_file, model_file)
 
       for pi in range(options.processes):
@@ -212,7 +201,7 @@ def main():
       options_pkl.close()
 
       # create base fold command
-      cmd_fold = '%s time basenji_sad.py %s %s %s' % (
+      cmd_fold = '%s time hound_snp.py %s %s %s' % (
         cmd_base, options_pkl_file, params_file, model_file)
 
       for pi in range(options.processes):
