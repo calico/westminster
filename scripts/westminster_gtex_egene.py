@@ -30,7 +30,7 @@ def read_h5(h5_file, snp_stat, targets_file=None):
         scores_df['target_gene'] = scores_df['target_gene'].str.decode('utf-8')
         scores_df['mean_score'] = scores_df.filter(regex='RNA').mean(axis=1)
 
-        for col in scores_df.columns:  # Remove all RNA columns
+        for col in scores_df.columns:  # Remove all RNA columns as we only need the mean score
             if 'RNA' in col:
                 del scores_df[col]
 
