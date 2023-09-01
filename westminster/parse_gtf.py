@@ -29,7 +29,7 @@ def parse_gtf_file(file_path):
                 for attribute in attributes:
                     key, value = attribute.split(' ')
                     if key == 'gene_id':
-                        gene_id = value.strip('";')
+                        gene_id = value.strip('";').split(".")[0]  # remove the '.XX' versioning, keep only the prefix
                     elif key == 'gene_name':
                         gene_name = value.strip('";')
                     elif key == 'gene_type':
@@ -58,7 +58,7 @@ def parse_gtf_file(file_path):
                 for attribute in attributes:
                     key, value = attribute.split(' ')
                     if key == 'gene_id':
-                        gene_id = value.strip('";')
+                        gene_id = value.strip('";').split(".")[0]  # remove the '.XX' versioning
                     elif key == 'transcript_id':
                         transcript_id = value.strip('";')
                     elif key == 'transcript_type':
@@ -73,3 +73,5 @@ def parse_gtf_file(file_path):
                         'strand': strand
                     })
     return gene_data
+
+
