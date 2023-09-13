@@ -96,16 +96,14 @@ def remove_indels(finemapped_dat, threshold=0.1):
     ref_allele = [x.split('_')[-2] for x in finemapped_dat['variant']]
     alt_allele = [x.split('_')[-1] for x in finemapped_dat['variant']]
     var_max_length = np.array([max(len(x), len(y)) for x, y in zip(ref_allele, alt_allele)])
-
     impacted_cred_sets = finemapped_dat['cs_id'][(var_max_length > 1) & (finemapped_dat['pip'] > threshold)]
-
-    remove_cred_set = np.array([x not in impacted_cred_sets for x in finemapped_dat['cs_id']])
-    remove_var = np.array([x <= 1 for x in var_max_length])
-    finemapped_dat_filt = finemapped_dat[np.logical_and(remove_cred_set, remove_var)]  # remove INDELs
+    remove_cred_set = np.array([x in impacted_cred_sets.to_list() for x in finemapped_dat['cs_id']])
+    remove_var = np.array([x > 1 for x in var_max_length])
+    remove_rows = np.logical_or(remove_cred_set, remove_var)
+    finemapped_dat_filt = finemapped_dat[np.logical_not(remove_rows)]  # remove INDELs
     print("Number of cred. sets removed due to INDELs:", len(set(finemapped_dat['cs_id'])) -
           len(set(finemapped_dat_filt['cs_id'])))
     return finemapped_dat_filt
-
 
 def assign_bz_scores(borzoi_df, fine_mapped_df):
     merged_df = fine_mapped_df.merge(borzoi_df, on=['variant'], how='inner')
