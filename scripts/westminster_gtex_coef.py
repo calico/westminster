@@ -85,7 +85,7 @@ def main():
     eqtl_df = read_eqtl(tissue, args.gtex_vcf_dir)
     if eqtl_df is not None:
       # read model predictions
-      gtex_scores_file = f'{args.gtex_dir}/{tissue}_pos/sad.h5'
+      gtex_scores_file = f'{args.gtex_dir}/{tissue}_pos/scores.h5'
       variant_scores = read_scores(gtex_scores_file, keyword, eqtl_df,
                                    args.snp_stat, verbose=args.verbose)
       variant_scores = variant_scores[eqtl_df.consistent]
@@ -162,7 +162,7 @@ def read_eqtl(tissue: str, gtex_vcf_dir: str, pip_t: float=0.9):
   df_eqtl = pd.read_csv(eqtl_file, sep='\t', index_col=0)
 
   # pip filter
-  pip_match = re.search(r"_pip(\d+).?$", gtex_vcf_dir).group(1)
+  pip_match = re.search(r"_pip(\d+)", gtex_vcf_dir).group(1)
   pip_t = float(pip_match) / 100
   assert(pip_t > 0 and pip_t <= 1)
   df_causal = df_eqtl[df_eqtl.pip > pip_t]
