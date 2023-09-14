@@ -20,7 +20,7 @@ import os
 import numpy as np
 
 
-def collect_scores(out_dir: str, num_jobs: int, h5f_name: str='sad.h5'):
+def collect_scores(out_dir: str, num_jobs: int, h5f_name: str='scores.h5'):
   """Collect parallel SAD jobs' output into one HDF5.
 
   Args:
@@ -122,7 +122,7 @@ def nonzero_h5(h5_file: str, stat_keys):
         for sk in stat_keys:
           sad = h5_open[sk][:]
           if (sad != 0).sum() == 0:
-            return False  
+            return False
         return True
     except:
       return False
