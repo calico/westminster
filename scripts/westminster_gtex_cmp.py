@@ -36,7 +36,7 @@ def main():
     parser.add_option('-o', dest='out_dir',
             default='compare_scores')
     parser.add_option('--stats', dest='stats',
-            default='SAD')
+            default='logD2')
     parser.add_option('-v', dest='min_variants',
             default=0, type='int',
             help='Minimum variants to include tissue [Default: %default]')
@@ -84,9 +84,13 @@ def main():
             os.mkdir(tissue_out_dir)
 
         # count variants
-        with h5py.File('%s/%s_pos/sad.h5' % (bench_dirs[0],tissue), 'r') as tissue_sad_h5:
+        tissue_scores_file = '%s/%s_pos/scores.h5' % (bench_dirs[0],tissue)
+        # TEMP while I still have 'sad' around
+        if not os.path.isfile(tissue_scores_file):
+            tissue_scores_file = '%s/%s_pos/sad.h5' % (bench_dirs[0],tissue)
+        with h5py.File(tissue_scores_file, 'r') as tissue_scores_h5:
             sad_stat_up = sad_stats[0]
-            num_variants = tissue_sad_h5[sad_stat_up].shape[0]
+            num_variants = tissue_scores_h5[sad_stat_up].shape[0]
 
         # filter variants
         if num_variants >= options.min_variants:
