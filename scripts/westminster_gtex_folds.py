@@ -56,6 +56,9 @@ def main():
   snp_options.add_option('--shifts', dest='shifts',
       default='0', type='str',
       help='Ensemble prediction shifts [Default: %default]')
+  snp_options.add_option("--stitch", dest="stitch",
+      default=False, action="store_true",
+      help=" [Default: %default]")
   snp_options.add_option('--stats', dest='snp_stats',
       default='logSAD',
       help='Comma-separated list of stats to save. [Default: %default]')
