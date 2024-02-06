@@ -28,9 +28,9 @@ import westminster
 from westminster.multi import collect_scores, nonzero_h5
 
 """
-westminster_gtex_folds.py
+westminster_gnomad_folds.py
 
-Benchmark Baskerville model replicates on GTEx eQTL classification task.
+Benchmark Baskerville model replicates on Gnomad common vs. rare classification task.
 """
 
 ################################################################################
