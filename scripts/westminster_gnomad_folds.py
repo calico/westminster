@@ -24,12 +24,13 @@ import numpy as np
 
 import slurm
 
+import westminster
 from westminster.multi import collect_scores, nonzero_h5
 
 """
-westminster_gtex_folds.py
+westminster_gnomad_folds.py
 
-Benchmark Baskerville model replicates on GTEx eQTL classification task.
+Benchmark Baskerville model replicates on Gnomad common vs. rare classification task.
 """
 
 ################################################################################
@@ -45,7 +46,7 @@ def main():
       default=0, type="float",
       help="Cluster SNPs within a %% of the seq length to make a single ref pred [Default: %default]")
   snp_options.add_option('-f', dest='genome_fasta',
-      default='%s/data/hg38.fa' % os.environ['BASENJIDIR'],
+      default='/home/anya/workspace/genome/hg38.fa',
       help='Genome FASTA for sequences [Default: %default]')
   snp_options.add_option('-o',dest='out_dir',
       default='gtex',
@@ -63,7 +64,7 @@ def main():
       default='logSAD',
       help='Comma-separated list of stats to save. [Default: %default]')
   snp_options.add_option('-t', dest='targets_file',
-      default=None, type='str',
+      default='/scratch3/drk/seqnn/data/v9/hg38/targets.txt', type='str',
       help='File specifying target indexes and labels in table format')
   snp_options.add_option("-u", dest="untransform_old",
         default=False, action="store_true",
@@ -160,9 +161,14 @@ def main():
   cmd_base += ' echo $HOSTNAME;'
 
   jobs = []
+  run_hound = True
 
   for ci in range(options.crosses):
     for fi in range(options.num_folds):
+
+      if not run_hound:
+          continue
+
       it_dir = '%s/f%dc%d' % (exp_dir, fi, ci)
       name = '%s-f%dc%d' % (options.name, fi, ci)
 
@@ -229,8 +235,9 @@ def main():
               mem=30000, time='7-0:0:0')
           jobs.append(j)
 
-  slurm.multi_run(jobs, max_proc=options.max_proc, verbose=True,
-                  launch_sleep=10, update_sleep=60)
+  if run_hound:
+    slurm.multi_run(jobs, max_proc=options.max_proc, verbose=True,
+                      launch_sleep=10, update_sleep=60)
 
   #######################################################
   # collect output
@@ -250,20 +257,6 @@ def main():
         collect_scores(pos_out_dir, options.processes)
 
   ################################################################
-  # split study/tissue variants
-
-  for ci in range(options.crosses):
-    for fi in range(options.num_folds):
-      it_out_dir = '%s/f%dc%d/%s' % (exp_dir, fi, ci, gtex_out_dir)
-      print(it_out_dir)
-
-      # split positives
-      split_sad(it_out_dir, 'pos', options.gtex_vcf_dir, snp_stats)
-
-      # split negatives
-      split_sad(it_out_dir, 'neg', options.gtex_vcf_dir, snp_stats)
-
-  ################################################################
   # ensemble
   
   ensemble_dir = '%s/ensemble' % exp_dir
@@ -274,37 +267,37 @@ def main():
   if not os.path.isdir(gtex_dir):
     os.mkdir(gtex_dir)
 
-  for gtex_pos_vcf in glob.glob('%s/*_pos.vcf' % options.gtex_vcf_dir):
-    gtex_neg_vcf = gtex_pos_vcf.replace('_pos.','_neg.')
-    pos_base = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0]
-    neg_base = os.path.splitext(os.path.split(gtex_neg_vcf)[1])[0]
+  gtex_pos_vcf = '%s/merge_pos.vcf' % options.gtex_vcf_dir
+  gtex_neg_vcf = gtex_pos_vcf.replace('_pos.','_neg.')
+  pos_base = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0]
+  neg_base = os.path.splitext(os.path.split(gtex_neg_vcf)[1])[0]
 
-    # collect SAD files
-    sad_pos_files = []
-    sad_neg_files = []
-    for ci in range(options.crosses):
-      for fi in range(options.num_folds):
-        it_dir = '%s/f%dc%d' % (exp_dir, fi, ci)
-        it_out_dir = '%s/%s' % (it_dir, gtex_out_dir)
-        
-        sad_pos_file = '%s/%s/scores.h5' % (it_out_dir, pos_base)
-        sad_pos_files.append(sad_pos_file)
+  # collect SAD files
+  sad_pos_files = []
+  sad_neg_files = []
+  for ci in range(options.crosses):
+    for fi in range(options.num_folds):
+      it_dir = '%s/f%dc%d' % (exp_dir, fi, ci)
+      it_out_dir = '%s/%s' % (it_dir, gtex_out_dir)
+      
+      sad_pos_file = '%s/%s/scores.h5' % (it_out_dir, pos_base)
+      sad_pos_files.append(sad_pos_file)
 
-        sad_neg_file = '%s/%s/scores.h5' % (it_out_dir, neg_base)
-        sad_neg_files.append(sad_neg_file)
+      sad_neg_file = '%s/%s/scores.h5' % (it_out_dir, neg_base)
+      sad_neg_files.append(sad_neg_file)
 
-    # ensemble
-    ens_pos_dir = '%s/%s' % (gtex_dir, pos_base)
-    os.makedirs(ens_pos_dir, exist_ok=True)
-    ens_pos_file = '%s/scores.h5' % (ens_pos_dir)
-    if not os.path.isfile(ens_pos_file):
-      ensemble_sad_h5(ens_pos_file, sad_pos_files)
+  # ensemble
+  ens_pos_dir = '%s/%s' % (gtex_dir, pos_base)
+  os.makedirs(ens_pos_dir, exist_ok=True)
+  ens_pos_file = '%s/scores.h5' % (ens_pos_dir)
+  if not os.path.isfile(ens_pos_file):
+    ensemble_sad_h5(ens_pos_file, sad_pos_files)
 
-    ens_neg_dir = '%s/%s' % (gtex_dir, neg_base)
-    os.makedirs(ens_neg_dir, exist_ok=True)
-    ens_neg_file = '%s/scores.h5' % (ens_neg_dir)
-    if not os.path.isfile(ens_neg_file):
-      ensemble_sad_h5(ens_neg_file, sad_neg_files)
+  ens_neg_dir = '%s/%s' % (gtex_dir, neg_base)
+  os.makedirs(ens_neg_dir, exist_ok=True)
+  ens_neg_file = '%s/scores.h5' % (ens_neg_dir)
+  if not os.path.isfile(ens_neg_file):
+    ensemble_sad_h5(ens_neg_file, sad_neg_files)
 
 
   ################################################################
@@ -322,71 +315,38 @@ def main():
       it_dir = '%s/f%dc%d' % (exp_dir, fi, ci)
       it_out_dir = '%s/%s' % (it_dir, gtex_out_dir)
 
-      for gtex_pos_vcf in glob.glob('%s/*_pos.vcf' % options.gtex_vcf_dir):
-        tissue = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0][:-4]
-        sad_pos = '%s/%s_pos/scores.h5' % (it_out_dir, tissue)
-        sad_neg = '%s/%s_neg/scores.h5' % (it_out_dir, tissue)
-        for snp_stat in snp_stats:
-          class_out_dir = '%s/%s_class-%s' % (it_out_dir, tissue, snp_stat)
-          if options.class_name is not None:
-            class_out_dir += '-%s' % options.class_name
-          if not os.path.isfile('%s/stats.txt' % class_out_dir):
-            cmd_class = '%s -o %s --stat %s' % (cmd_base, class_out_dir, snp_stat)
-            cmd_class += ' %s %s' % (sad_pos, sad_neg)
-            j = slurm.Job(cmd_class, tissue,
-                '%s.out'%class_out_dir, '%s.err'%class_out_dir,
-                queue='standard', cpu=2,
-                mem=22000, time='1-0:0:0')
-            jobs.append(j)
+      tissue = "merge"
+      sad_pos = '%s/%s_pos/scores.h5' % (it_out_dir, tissue)
+      sad_neg = '%s/%s_neg/scores.h5' % (it_out_dir, tissue)
+      for snp_stat in snp_stats:
+        class_out_dir = '%s/%s_class-%s' % (it_out_dir, tissue, snp_stat)
+        if options.class_name is not None:
+          class_out_dir += '-%s' % options.class_name
+        if not os.path.isfile('%s/stats.txt' % class_out_dir):
+          cmd_class = '%s -o %s --stat %s' % (cmd_base, class_out_dir, snp_stat)
+          cmd_class += ' %s %s' % (sad_pos, sad_neg)
+          j = slurm.Job(cmd_class, tissue,
+              '%s.out'%class_out_dir, '%s.err'%class_out_dir,
+              queue='standard', cpu=2,
+              mem=22000, time='1-0:0:0')
+          jobs.append(j)
 
   # ensemble
-  for gtex_pos_vcf in glob.glob('%s/*_pos.vcf' % options.gtex_vcf_dir):
-    tissue = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0][:-4]
-    sad_pos = '%s/%s_pos/scores.h5' % (gtex_dir, tissue)
-    sad_neg = '%s/%s_neg/scores.h5' % (gtex_dir, tissue)
-    for snp_stat in snp_stats:
-      class_out_dir = '%s/%s_class-%s' % (gtex_dir, tissue, snp_stat)
-      if options.class_name is not None:
-        class_out_dir += '-%s' % options.class_name
-      if not os.path.isfile('%s/stats.txt' % class_out_dir):
-        cmd_class = '%s -o %s --stat %s' % (cmd_base, class_out_dir, snp_stat)
-        cmd_class += ' %s %s' % (sad_pos, sad_neg)
-        j = slurm.Job(cmd_class, tissue,
-            '%s.out'%class_out_dir, '%s.err'%class_out_dir,
-            queue='standard', cpu=2,
-            mem=22000, time='1-0:0:0')
-        jobs.append(j)
-
-  slurm.multi_run(jobs, verbose=True)
-
-  ################################################################
-  # coefficient analysis
-
-  cmd_base = 'westminster_gtex_coef.py -g %s' % options.gtex_vcf_dir
-
-  jobs = []
-  for ci in range(options.crosses):
-    for fi in range(options.num_folds):
-      it_dir = '%s/f%dc%d' % (exp_dir, fi, ci)
-      it_out_dir = '%s/%s' % (it_dir, gtex_out_dir)
-      coef_out_dir = '%s/coef' % it_out_dir
-
-      cmd_coef = f'{cmd_base} -o {coef_out_dir} {it_out_dir}'
-      j = slurm.Job(cmd_coef, 'coef',
-            f'{coef_out_dir}.out', f'{coef_out_dir}.err',
-            queue='standard', cpu=2,
-            mem=22000, time='12:0:0')
+  tissue = "merge"
+  sad_pos = '%s/%s_pos/scores.h5' % (gtex_dir, tissue)
+  sad_neg = '%s/%s_neg/scores.h5' % (gtex_dir, tissue)
+  for snp_stat in snp_stats:
+    class_out_dir = '%s/%s_class-%s' % (gtex_dir, tissue, snp_stat)
+    if options.class_name is not None:
+      class_out_dir += '-%s' % options.class_name
+    if not os.path.isfile('%s/stats.txt' % class_out_dir):
+      cmd_class = '%s -o %s --stat %s' % (cmd_base, class_out_dir, snp_stat)
+      cmd_class += ' %s %s' % (sad_pos, sad_neg)
+      j = slurm.Job(cmd_class, tissue,
+          '%s.out'%class_out_dir, '%s.err'%class_out_dir,
+          queue='standard', cpu=2,
+          mem=22000, time='1-0:0:0')
       jobs.append(j)
-
-  # ensemble
-  it_out_dir = f'{exp_dir}/ensemble/{gtex_out_dir}'
-  coef_out_dir = '%s/coef' % it_out_dir
-  cmd_coef = f'{cmd_base} -o {coef_out_dir} {it_out_dir}'
-  j = slurm.Job(cmd_coef, 'coef',
-        f'{coef_out_dir}.out', f'{coef_out_dir}.err',
-        queue='standard', cpu=2,
-        mem=22000, time='12:0:0')
-  jobs.append(j)
 
   slurm.multi_run(jobs, verbose=True)
 
