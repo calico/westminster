@@ -59,6 +59,9 @@ def main():
   sed_options.add_option('--shifts', dest='shifts',
       default='0', type='str',
       help='Ensemble prediction shifts [Default: %default]')
+  snp_options.add_option("--stitch", dest="stitch",
+      default=False, action="store_true",
+      help=" [Default: %default]")
   sed_options.add_option('--span', dest='span',
       default=False, action='store_true',
       help='Aggregate entire gene span [Default: %default]')
