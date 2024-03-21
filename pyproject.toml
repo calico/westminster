@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=69.0.3", "setuptools_scm>=8.0.4"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "westminster"
+description = "westminster"
+authors = [
+    {name = "Calico f(DNA)", email = "drk@calicolabs.com"},
+]
+readme = "README.md"
+classifiers = ["License :: OSI Approved :: MIT License"]
+dynamic = ["version"]
+
+requires-python = ">=3.9"
+dependencies = [
+    "h5py~=3.10.0",
+    "numpy~=1.24.3",
+    "pandas~=1.5.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black~=23.12.1",
+    "pytest~=7.4.4",
+    "ruff~=0.1.11",
+]
+
+[project.urls]
+Homepage = "https://github.com/calico/westminster"
+
+[tool.setuptools_scm]
