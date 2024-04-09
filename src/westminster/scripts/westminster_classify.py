@@ -35,6 +35,12 @@ def main():
         help="Take features absolute value [Default: %default]",
     )
     parser.add_option(
+        '-f',
+        dest='num_folds',
+        default=8,
+        type='int',
+        help='Cross-validation folds [Default: %default]')
+    parser.add_option(
         "-i",
         dest="iterations",
         default=1,
@@ -51,7 +57,7 @@ def main():
     parser.add_option(
         "--iscale",
         dest="indel_scale",
-        default=0.1,
+        default=1,
         type="float",
         help="Scale indel SAD  [Default: %default]",
     )
@@ -162,7 +168,7 @@ def main():
         aurocs, fpr_folds, tpr_folds, fpr_mean, tpr_mean, preds = randfor_roc(
             X,
             y,
-            folds=8,
+            folds=options.num_folds,
             iterations=options.iterations,
             min_samples_leaf=options.msl,
             random_state=options.random_seed,
@@ -518,6 +524,12 @@ def read_stats(stats_h5_file: str, stat_key: str, target_slice: np.array):
     """
     with h5py.File(stats_h5_file, "r") as stats_h5:
         sad = stats_h5[stat_key][:]
+        # TEMP - insertions only
+        # ref = [ra.decode('UTF-8') for ra in stats_h5['ref_allele']]
+        # alt = [aa.decode('UTF-8') for aa in stats_h5['alt_allele']]
+        # num_snps = len(ref)
+        # indel = np.array([len(alt[si]) - len(ref[si]) for si in range(num_snps)])
+        # sad = sad[indel < 0]
     if target_slice is not None:
         sad = sad[..., target_slice]
     sad = np.nan_to_num(sad).astype("float32")

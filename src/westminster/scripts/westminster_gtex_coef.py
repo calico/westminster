@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 import argparse
 import os
-import pdb
 import re
+import sys
 
 import h5py
 import numpy as np
@@ -35,16 +35,22 @@ def main():
     parser.add_argument(
         "-g",
         "--gtex_vcf_dir",
-        default="/home/drk/seqnn/data/gtex_fine/susie_pip90",
+        default="/home/drk/seqnn/data/gtex_fine/susie_pip90r",
         help="GTEx VCF directory",
     )
+    parser.add_argument(
+        '-m',
+        '--min_variants',
+        default=32,
+        type=int,
+        help='Minimum number of variants for tissue to be included')
     parser.add_argument(
         "-p", "--plot", action="store_true", help="Generate tissue prediction plots"
     )
     parser.add_argument(
         "-s",
         "--snp_stat",
-        default="logSAD",
+        default="logSUM",
         help="SNP statistic. [Default: %(default)s]",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -93,13 +99,17 @@ def main():
 
         # read causal variants
         eqtl_df = read_eqtl(tissue, args.gtex_vcf_dir)
-        if eqtl_df is not None:
+        if eqtl_df is not None and eqtl_df.shape[0] > args.min_variants:
             # read model predictions
             gtex_scores_file = f"{args.gtex_dir}/{tissue}_pos/scores.h5"
-            variant_scores = read_scores(
-                gtex_scores_file, keyword, eqtl_df, args.snp_stat, verbose=args.verbose
-            )
-            variant_scores = variant_scores[eqtl_df.consistent]
+            try:
+                variant_scores = read_scores(
+                    gtex_scores_file, keyword, eqtl_df, args.snp_stat, verbose=args.verbose
+                )
+                variant_scores = variant_scores[eqtl_df.consistent]
+            except TypeError:
+                print(f'Tracks matching {tissue} are missing', file=sys.stderr)
+                continue
 
             # compute sign AUROCs
             variant_sign = eqtl_df[eqtl_df.consistent].sign
