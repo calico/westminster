@@ -1,0 +1,38 @@
+# Workflow to build the Python package and push to Calico-PyPI
+
+name: Build/Release Python Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      python-version:
+        default: "3.10"
+        description: "Python version to use for building the package"
+        required: false
+        type: string
+      release-version:
+        description: "New version (e.g., v0.0.0)"
+        required: true
+      release-notes:
+        default: ""
+        required: false
+        description: "Release notes for the new version"
+        type: string
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: "write"
+  id-token: "write"
+
+jobs:
+  call-release-new-version-calico-pypi:
+    if: github.event.repository.name != 'github-template-python-library'
+    uses: calico/calico-github-actions/.github/workflows/release-new-version-calico-pypi.yml@main
+    with:
+      python-version: ${{ inputs.python-version }}
+      release-version: ${{ inputs.release-version }}
+      release-notes: ${{ inputs.release-notes }}
+    secrets: inherit
