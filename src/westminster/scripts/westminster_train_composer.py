@@ -61,7 +61,7 @@ def main():
         help="Training output directory [Default: %default]",
     )
     train_options.add_option(
-        "-log_dir",
+        "-l",
         dest="log_dir",
         default="log_out",
         help="Tensorboard log directory [Default: %default]",
