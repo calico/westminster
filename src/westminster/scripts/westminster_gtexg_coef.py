@@ -35,7 +35,7 @@ def main():
     parser.add_argument(
         "-g",
         "--gtex_vcf_dir",
-        default="/home/drk/seqnn/data/gtex_fine/susie_pip90",
+        default="/home/drk/seqnn/data/gtex_fine/susie_pip90r",
         help="GTEx VCF directory",
     )
     parser.add_argument(
@@ -44,7 +44,7 @@ def main():
     parser.add_argument(
         "-s",
         "--snp_stat",
-        default="logSED",
+        default="logSUM",
         help="SNP statistic. [Default: %(default)s]",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -95,7 +95,7 @@ def main():
         eqtl_df = read_eqtl(tissue, args.gtex_vcf_dir)
         if eqtl_df is not None:
             # read model predictions
-            gtex_scores_file = f"{args.gtex_dir}/{tissue}_pos/sed.h5"
+            gtex_scores_file = f"{args.gtex_dir}/{tissue}_pos/scores.h5"
             eqtl_df = add_scores(
                 gtex_scores_file, keyword, eqtl_df, args.snp_stat, verbose=args.verbose
             )
@@ -107,9 +107,7 @@ def main():
             coef_r = spearmanr(eqtl_df.coef, eqtl_df.score)[0]
 
             # classification AUROC
-            class_auroc = classify_auroc(
-                gtex_scores_file, keyword, eqtl_df, args.snp_stat
-            )
+            class_auroc = classify_auroc(gtex_scores_file, keyword, args.snp_stat)
 
             if args.plot:
                 eqtl_df.to_csv(f"{args.out_dir}/{tissue}.tsv", index=False, sep="\t")
@@ -210,18 +208,17 @@ def add_scores(
     """
     with h5py.File(gtex_scores_file, "r") as gtex_scores_h5:
         # read data
-        snp_i = gtex_scores_h5["si"][:]
-        snps = np.array([snp.decode("UTF-8") for snp in gtex_scores_h5["snp"]])
-        ref_allele = np.array(
-            [ref.decode("UTF-8") for ref in gtex_scores_h5["ref_allele"]]
-        )
-        genes = np.array([snp.decode("UTF-8") for snp in gtex_scores_h5["gene"]])
-        target_ids = np.array(
-            [ref.decode("UTF-8") for ref in gtex_scores_h5["target_ids"]]
-        )
-        target_labels = np.array(
-            [ref.decode("UTF-8") for ref in gtex_scores_h5["target_labels"]]
-        )
+        snps = [snp.decode("UTF-8") for snp in gtex_scores_h5["snp"]]
+        ref_allele = [ref.decode("UTF-8") for ref in gtex_scores_h5["ref_allele"]]
+        target_ids = [tid.decode("UTF-8") for tid in gtex_scores_h5["target_ids"]]
+        target_labels = [tl.decode("UTF-8") for tl in gtex_scores_h5["target_labels"]]
+        gtex_scores = gtex_scores_h5[score_key]
+
+        # map gene identifiers
+        gene_map = {}
+        for gene in gtex_scores_h5["gene"]:
+            gene = gene.decode("UTF-8")
+            gene_map[trim_dot(gene)] = gene
 
         # determine matching GTEx targets
         match_tis = []
@@ -236,62 +233,50 @@ def add_scores(
                     match_tis.append(ti)
         match_tis = np.array(match_tis)
 
-        # read scores and take mean across targets
-        score_table = gtex_scores_h5[score_key][..., match_tis].mean(
-            axis=-1, dtype="float32"
-        )
-        score_table = np.arcsinh(score_table)
+        # add scores to eQTL table
+        #  flipping when allele1 doesn't match
+        snp_ref = dict(zip(snps, ref_allele))
+        eqtl_df_scores = []
+        for _, eqtl in eqtl_df.iterrows():
+            if eqtl.variant in gtex_scores:
+                snp_scores = gtex_scores[eqtl.variant]
+                egene = gene_map.get(eqtl.gene, "")
+                if egene in snp_scores.keys():
+                    sgs = snp_scores[egene][match_tis].mean(dtype="float32")
+                else:
+                    sgs = 0
+            else:
+                sgs = 0
 
-    # hash scores to (snp,gene)
-    snpgene_scores = {}
-    for sgi in range(score_table.shape[0]):
-        snp = snps[snp_i[sgi]]
-        gene = trim_dot(genes[sgi])
-        snpgene_scores[(snp, gene)] = score_table[sgi]
+            # flip
+            if sgs != 0 and snp_ref[eqtl.variant] != eqtl.allele1:
+                sgs *= -1
 
-    # add scores to eQTL table
-    #  flipping when allele1 doesn't match
-    snp_ref = dict(zip(snps, ref_allele))
-    eqtl_df_scores = []
-    for sgi, eqtl in eqtl_df.iterrows():
-        sgs = snpgene_scores.get((eqtl.variant, eqtl.gene), 0)
-        if sgs != 0 and snp_ref[eqtl.variant] != eqtl.allele1:
-            sgs *= -1
-        eqtl_df_scores.append(sgs)
-    eqtl_df["score"] = eqtl_df_scores
+            eqtl_df_scores.append(sgs)
+        eqtl_df["score"] = eqtl_df_scores
 
     return eqtl_df
 
 
-def classify_auroc(
-    gtex_scores_file: str, keyword: str, eqtl_df: pd.DataFrame, score_key: str = "SED"
-):
+def classify_auroc(gtex_scores_file: str, keyword: str, score_key: str = "SED"):
     """Read eQTL RNA predictions for negatives from the given tissue.
 
     Args:
       gtex_scores_file (str): Variant scores HDF5.
       tissue_keyword (str): tissue keyword, for matching GTEx targets
-      eqtl_df (pd.DataFrame): eQTL dataframe
       score_key (str): score key in HDF5 file
       verbose (bool): Print matching targets.
 
     Returns:
       class_auroc (float): Classification AUROC.
     """
-    gtex_nscores_file = gtex_scores_file.replace("_pos", "_neg")
-    with h5py.File(gtex_nscores_file, "r") as gtex_scores_h5:
-        # read data
-        snp_i = gtex_scores_h5["si"][:]
-        snps = np.array([snp.decode("UTF-8") for snp in gtex_scores_h5["snp"]])
-        genes = np.array([snp.decode("UTF-8") for snp in gtex_scores_h5["gene"]])
-        target_ids = np.array(
-            [ref.decode("UTF-8") for ref in gtex_scores_h5["target_ids"]]
-        )
-        target_labels = np.array(
-            [ref.decode("UTF-8") for ref in gtex_scores_h5["target_labels"]]
-        )
+    # rescore positives using all genes
+    with h5py.File(gtex_scores_file, "r") as gtex_scores_h5:
+        gtex_scores = gtex_scores_h5[score_key]
 
         # determine matching GTEx targets
+        target_ids = [tid.decode("UTF-8") for tid in gtex_scores_h5["target_ids"]]
+        target_labels = [tl.decode("UTF-8") for tl in gtex_scores_h5["target_labels"]]
         match_tis = []
         for ti in range(len(target_ids)):
             if (
@@ -302,26 +287,33 @@ def classify_auroc(
                     match_tis.append(ti)
         match_tis = np.array(match_tis)
 
-        # read scores and take mean across targets
-        score_table = gtex_scores_h5[score_key][..., match_tis].mean(
-            axis=-1, dtype="float32"
-        )
-        # score_table = np.arcsinh(score_table)
+        # aggregate across genes w/ sum abs
+        psnp_scores = {}
+        for snp in gtex_scores.keys():
+            gtex_snp_scores = gtex_scores[snp]
+            psnp_scores[snp] = 0
+            for gene in gtex_snp_scores.keys():
+                sgs = gtex_snp_scores[gene][match_tis].mean(dtype="float32")
+                psnp_scores[snp] += np.abs(sgs)
 
-    # aggregate across genes w/ sum abs
-    nsnp_scores = {}
-    for sgi in range(score_table.shape[0]):
-        snp = snps[snp_i[sgi]]
-        nsnp_scores[snp] = nsnp_scores.get(snp, 0) + np.abs(score_table[sgi])
+    # score negatives
+    gtex_nscores_file = gtex_scores_file.replace("_pos", "_neg")
+    with h5py.File(gtex_nscores_file, "r") as gtex_scores_h5:
+        gtex_scores = gtex_scores_h5[score_key]
 
-    psnp_scores = {}
-    for sgi, eqtl in eqtl_df.iterrows():
-        snp = eqtl.variant
-        psnp_scores[snp] = psnp_scores.get(snp, 0) + np.abs(eqtl.score)
+        # aggregate across genes w/ sum abs
+        nsnp_scores = {}
+        for snp in gtex_scores.keys():
+            gtex_snp_scores = gtex_scores[snp]
+            nsnp_scores[snp] = 0
+            for gene in gtex_snp_scores.keys():
+                sgs = gtex_snp_scores[gene][match_tis].mean(dtype="float32")
+                nsnp_scores[snp] += np.abs(sgs)
 
     # compute AUROC
     Xp = list(psnp_scores.values())
     Xn = list(nsnp_scores.values())
+    print(keyword, len(Xp), len(Xn))
     X = Xp + Xn
     y = [1] * len(Xp) + [0] * len(Xn)
 
