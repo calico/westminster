@@ -35,11 +35,12 @@ def main():
         help="Take features absolute value [Default: %default]",
     )
     parser.add_option(
-        '-f',
-        dest='num_folds',
+        "-f",
+        dest="num_folds",
         default=8,
-        type='int',
-        help='Cross-validation folds [Default: %default]')
+        type="int",
+        help="Cross-validation folds [Default: %default]",
+    )
     parser.add_option(
         "-i",
         dest="iterations",

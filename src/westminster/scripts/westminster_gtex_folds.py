@@ -56,11 +56,11 @@ def main():
         help="Genome FASTA for sequences [Default: %default]",
     )
     snp_options.add_option(
-        '--indel_stitch',
-        dest='indel_stitch',
+        "--indel_stitch",
+        dest="indel_stitch",
         default=True,
-        action='store_true',
-        help="Stitch indel compensation shifts [Default: %default]"
+        action="store_true",
+        help="Stitch indel compensation shifts [Default: %default]",
     )
     snp_options.add_option(
         "-o",
@@ -406,10 +406,10 @@ def main():
     # fit classifiers
 
     # SNPs
-    cmd_base = 'westminster_classify.py -f 8 -i 100 -r 44 -s'
+    cmd_base = "westminster_classify.py -f 8 -i 100 -r 44 -s"
     # indels
     # cmd_base = 'westminster_classify.py -f 6 -i 64 -r 44 -s'
-    cmd_base += ' --msl %d' % options.msl
+    cmd_base += " --msl %d" % options.msl
 
     if options.class_targets_file is not None:
         cmd_base += " -t %s" % options.class_targets_file

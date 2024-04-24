@@ -61,6 +61,12 @@ def main():
         help="Training output directory [Default: %default]",
     )
     train_options.add_option(
+        "-log_dir",
+        dest="log_dir",
+        default="log_out",
+        help="Tensorboard log directory [Default: %default]",
+    )
+    train_options.add_option(
         "--restore",
         dest="restore",
         help="Restore model and continue training, from existing fold train dir [Default: %default]",
@@ -184,6 +190,7 @@ def main():
         print("Output directory %s exists. Please remove." % options.out_dir)
         exit(1)
     os.makedirs(options.out_dir, exist_ok=True)
+    os.makedirs(options.log_dir, exist_ok=True)
 
     # read model parameters
     with open(params_file) as params_open:
@@ -229,6 +236,7 @@ def main():
     for ci in range(options.crosses):
         for fi in range(num_folds):
             rep_dir = "%s/f%dc%d" % (options.out_dir, fi, ci)
+            rep_log_dir = "%s/f%dc%d" % (options.log_dir, fi, ci)
 
             train_dir = "%s/train" % rep_dir
             if options.restart and not options.checkpoint and os.path.isdir(train_dir):
@@ -459,7 +467,7 @@ def make_rep_data(data_dir, rep_data_dir, fi, ci):
         ti += 1
 
 
-def options_string(options, train_options, rep_dir):
+def options_string(options, train_options, rep_dir, rep_log_dir):
     options_str = ""
 
     for opt in train_options.option_list:
@@ -484,6 +492,10 @@ def options_string(options, train_options, rep_dir):
         # modify
         elif opt.dest == "out_dir":
             opt_value = "%s/train" % rep_dir
+
+        # modify
+        elif opt.dest == "log_dir":
+            opt_value = "%s/log" % rep_log_dir
 
         # find matching restore
         elif opt.dest == "restore":
