@@ -250,7 +250,7 @@ def main():
 
                 # train command
                 cmd = "python3 -m baskerville.scripts.hound_train"
-                cmd += " %s" % options_string(options, train_options, rep_dir)
+                cmd += " %s" % options_string(options, train_options, rep_dir, rep_log_dir)
                 cmd += " %s %s" % (params_file, " ".join(rep_data_dirs))
                 train_jobs.append(cmd)
 
