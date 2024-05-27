@@ -23,6 +23,7 @@ import h5py
 import numpy as np
 
 import slurm
+import util
 
 from westminster.multi import collect_scores, nonzero_h5
 
@@ -56,9 +57,16 @@ def main():
         help="Genome FASTA for sequences [Default: %default]",
     )
     snp_options.add_option(
+        "--float16",
+        dest="float16",
+        default=False,
+        action="store_true",
+        help="Use mixed float16 precision [Default: %default]",
+    )
+    snp_options.add_option(
         "--indel_stitch",
         dest="indel_stitch",
-        default=True,
+        default=False,
         action="store_true",
         help="Stitch indel compensation shifts [Default: %default]",
     )
@@ -157,7 +165,17 @@ def main():
         help="Number of folds to evaluate [Default: %default]",
     )
     fold_options.add_option(
-        "-g", dest="gtex_vcf_dir", default="/home/drk/seqnn/data/gtex_fine/susie_pip90r"
+        "-g",
+        "--gtex",
+        dest="gtex_vcf_dir",
+        default="/home/drk/seqnn/data/gtex_fine/susie_pip90r"
+    )
+    fold_options.add_option(
+        "--local",
+        dest="local",
+        default=False,
+        action="store_true",
+        help="Run locally [Default: %default]",
     )
     fold_options.add_option(
         "--name",
@@ -435,17 +453,20 @@ def main():
                             snp_stat,
                         )
                         cmd_class += " %s %s" % (sad_pos, sad_neg)
-                        j = slurm.Job(
-                            cmd_class,
-                            tissue,
-                            "%s.out" % class_out_dir,
-                            "%s.err" % class_out_dir,
-                            queue="standard",
-                            cpu=2,
-                            mem=22000,
-                            time="1-0:0:0",
-                        )
-                        jobs.append(j)
+                        if options.local:
+                            jobs.append(cmd_class)
+                        else:
+                            j = slurm.Job(
+                                cmd_class,
+                                tissue,
+                                "%s.out" % class_out_dir,
+                                "%s.err" % class_out_dir,
+                                queue="standard",
+                                cpu=2,
+                                mem=22000,
+                                time="1-0:0:0",
+                            )
+                            jobs.append(j)
 
     # ensemble
     for gtex_pos_vcf in glob.glob("%s/*_pos.vcf" % options.gtex_vcf_dir):
@@ -459,19 +480,25 @@ def main():
             if not os.path.isfile("%s/stats.txt" % class_out_dir):
                 cmd_class = "%s -o %s --stat %s" % (cmd_base, class_out_dir, snp_stat)
                 cmd_class += " %s %s" % (sad_pos, sad_neg)
-                j = slurm.Job(
-                    cmd_class,
-                    tissue,
-                    "%s.out" % class_out_dir,
-                    "%s.err" % class_out_dir,
-                    queue="standard",
-                    cpu=2,
-                    mem=22000,
-                    time="1-0:0:0",
-                )
-                jobs.append(j)
+                if options.local:
+                    jobs.append(cmd_class)
+                else:
+                    j = slurm.Job(
+                        cmd_class,
+                        tissue,
+                        "%s.out" % class_out_dir,
+                        "%s.err" % class_out_dir,
+                        queue="standard",
+                        cpu=2,
+                        mem=22000,
+                        time="1-0:0:0",
+                    )
+                    jobs.append(j)
 
-    slurm.multi_run(jobs, verbose=True)
+    if options.local:
+        util.exec_par(jobs, 3, verbose=True)
+    else:
+        slurm.multi_run(jobs, verbose=True)
 
     ################################################################
     # coefficient analysis
@@ -486,35 +513,44 @@ def main():
             coef_out_dir = "%s/coef" % it_out_dir
 
             cmd_coef = f"{cmd_base} -o {coef_out_dir} {it_out_dir}"
-            j = slurm.Job(
-                cmd_coef,
-                "coef",
-                f"{coef_out_dir}.out",
-                f"{coef_out_dir}.err",
-                queue="standard",
-                cpu=2,
-                mem=22000,
-                time="12:0:0",
-            )
-            jobs.append(j)
+            if options.local:
+                jobs.append(cmd_coef)
+            else:
+                j = slurm.Job(
+                    cmd_coef,
+                    "coef",
+                    f"{coef_out_dir}.out",
+                    f"{coef_out_dir}.err",
+                    queue="standard",
+                    cpu=2,
+                    mem=22000,
+                    time="12:0:0",
+                )
+                jobs.append(j)
 
     # ensemble
     it_out_dir = f"{exp_dir}/ensemble/{gtex_out_dir}"
     coef_out_dir = "%s/coef" % it_out_dir
     cmd_coef = f"{cmd_base} -o {coef_out_dir} {it_out_dir}"
-    j = slurm.Job(
-        cmd_coef,
-        "coef",
-        f"{coef_out_dir}.out",
-        f"{coef_out_dir}.err",
-        queue="standard",
-        cpu=2,
-        mem=22000,
-        time="12:0:0",
-    )
-    jobs.append(j)
+    if options.local:
+        jobs.append(cmd_coef)
+    else:
+        j = slurm.Job(
+            cmd_coef,
+            "coef",
+            f"{coef_out_dir}.out",
+            f"{coef_out_dir}.err",
+            queue="standard",
+            cpu=2,
+            mem=22000,
+            time="12:0:0",
+        )
+        jobs.append(j)
 
-    slurm.multi_run(jobs, verbose=True)
+    if options.local:
+        util.exec_par(jobs, 3, verbose=True)
+    else:
+        slurm.multi_run(jobs, verbose=True)
 
 
 def ensemble_sad_h5(ensemble_h5_file: str, scores_files):

@@ -13,7 +13,54 @@
 # limitations under the License.
 # =========================================================================
 
+import matplotlib.pyplot as plt
+import numpy as np
 from scipy.stats import wilcoxon, ttest_rel
+import seaborn as sns
+
+def jointplot(ref_cors, exp_cors, label1, label2, out_pdf=None):
+    """"
+    My preferred jointplot settings.
+
+    Args:
+        ref_cors ([float]): Reference metrics.
+        exp_cors ([float]: Experiment metrics.
+        label1 (str): Label for reference metrics.
+        label2 (str): Label for experiment metrics.
+        out_pdf (str): Output PDF file.
+    """
+    vmin = min(np.min(ref_cors), np.min(exp_cors))
+    vmax = max(np.max(ref_cors), np.max(exp_cors))
+    vspan = vmax - vmin
+    vbuf = vspan * 0.1
+    vmin -= vbuf
+    vmax += vbuf
+
+    g = sns.jointplot(x=ref_cors, y=exp_cors, space=0)
+
+    eps = 0.05
+    g.ax_joint.text(
+        1 - eps,
+        eps,
+        "Mean: %.4f" % np.mean(ref_cors),
+        horizontalalignment="right",
+        transform=g.ax_joint.transAxes,
+    )
+    g.ax_joint.text(
+        eps,
+        1 - eps,
+        "Mean: %.4f" % np.mean(exp_cors),
+        verticalalignment="top",
+        transform=g.ax_joint.transAxes,
+    )
+
+    g.ax_joint.plot([vmin, vmax], [vmin, vmax], linestyle="--", color="orange")
+    g.ax_joint.set_xlabel(label1)
+    g.ax_joint.set_ylabel(label2)
+
+    plt.tight_layout(w_pad=0, h_pad=0)
+    if out_pdf is not None:
+        plt.savefig(out_pdf)
 
 
 def stat_tests(ref_cors, exp_cors, alternative: str):
