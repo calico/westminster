@@ -39,11 +39,12 @@ def main():
         help="GTEx VCF directory",
     )
     parser.add_argument(
-        '-m',
-        '--min_variants',
+        "-m",
+        "--min_variants",
         default=32,
         type=int,
-        help='Minimum number of variants for tissue to be included')
+        help="Minimum number of variants for tissue to be included",
+    )
     parser.add_argument(
         "-p", "--plot", action="store_true", help="Generate tissue prediction plots"
     )
@@ -104,11 +105,15 @@ def main():
             gtex_scores_file = f"{args.gtex_dir}/{tissue}_pos/scores.h5"
             try:
                 variant_scores = read_scores(
-                    gtex_scores_file, keyword, eqtl_df, args.snp_stat, verbose=args.verbose
+                    gtex_scores_file,
+                    keyword,
+                    eqtl_df,
+                    args.snp_stat,
+                    verbose=args.verbose,
                 )
                 variant_scores = variant_scores[eqtl_df.consistent]
             except TypeError:
-                print(f'Tracks matching {tissue} are missing', file=sys.stderr)
+                print(f"Tracks matching {tissue} are missing", file=sys.stderr)
                 continue
 
             # compute sign AUROCs

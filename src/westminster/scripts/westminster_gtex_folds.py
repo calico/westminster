@@ -168,7 +168,7 @@ def main():
         "-g",
         "--gtex",
         dest="gtex_vcf_dir",
-        default="/home/drk/seqnn/data/gtex_fine/susie_pip90r"
+        default="/home/drk/seqnn/data/gtex_fine/susie_pip90r",
     )
     fold_options.add_option(
         "--local",
