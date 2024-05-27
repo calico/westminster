@@ -166,12 +166,14 @@ def main():
 
     for ci in range(options.crosses):
         for fi in range(options.fold_subset):
+            it_dir = "%s/f%dc%d" % (options.out_dir, fi, ci)
+
             for di in range(num_data):
                 if num_data == 1:
-                    eval_dir = f"{options.out_dir}/f{fi}c{ci}/eval"
+                    eval_dir = f"{it_dir}/eval"
                     model_file = f"{it_dir}/train/model_best.h5"
                 else:
-                    eval_dir = f"{options.out_dir}/f{fi}c{ci}/eval{di}"
+                    eval_dir = f"{it_dir}/eval{di}"
                     model_file = f"{it_dir}/train/model{di}_best.h5"
                 os.makedirs(eval_dir, exist_ok=True)
 
@@ -228,10 +230,10 @@ def main():
 
                 for di in range(num_data):
                     if num_data == 1:
-                        out_dir = "%s/eval_spec" % it_dir
+                        out_dir = "%s/spec" % it_dir
                         model_file = "%s/train/model_best.h5" % it_dir
                     else:
-                        out_dir = "%s/eval%d_spec" % (it_dir, di)
+                        out_dir = "%s/spec%d" % (it_dir, di)
                         model_file = "%s/train/model%d_best.h5" % (it_dir, di)
 
                     # check if done
