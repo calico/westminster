@@ -229,7 +229,7 @@ def main():
         else:
             cmd += ' %s %s' % (params_file, ' '.join(rep_data_dirs))
 
-        cmd += ' > %s/train.log 2>&1' % rep_dir
+        cmd += ' > %s/train.log 2>&1 &\n' % rep_dir
 
         sbf = os.path.abspath('%s/train.sb' % rep_dir)
         with open(sbf, 'w') as file:
