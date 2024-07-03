@@ -49,18 +49,40 @@ def main():
   train_options.add_option('-o', dest='out_dir',
       default='train_out',
       help='Training output directory [Default: %default]')
-  train_options.add_option('--restore', dest='restore',
-      help='Restore model and continue training, from existing fold train dir [Default: %default]')
-  train_options.add_option('--trunk', dest='trunk',
-      default=False, action='store_true',
-      help='Restore only model trunk [Default: %default]')
   train_options.add_option('--tfr_train', dest='tfr_train_pattern',
       default=None,
       help='Training TFR pattern string appended to data_dir/tfrecords for subsetting [Default: %default]')
   train_options.add_option('--tfr_eval', dest='tfr_eval_pattern',
       default=None,
       help='Evaluation TFR pattern string appended to data_dir/tfrecords for subsetting [Default: %default]')
-  parser.add_option_group(train_options)
+  # restore
+  train_options.add_option('--restore', dest='restore',
+      help='Restore model and continue training, from existing fold train dir [Default: %default]')
+  train_options.add_option('--trunk', dest='trunk',
+      default=False, action='store_true',
+      help='Restore only model trunk [Default: %default]')
+
+  # transfer options
+  train_options.add_option('--transfer_mode', dest='transfer',
+      default='other', help='transfer method to apply.[full, linear, other]')
+  
+  train_options.add_option('--att_adapter', dest='att_adapter',
+      default=None, type="string", 
+                           help='attention adapter. [adapterHoulsby, lora, lora_full, ia3, locon, houlsby_se, lora_conv]')
+  train_options.add_option('--att_latent', dest='att_latent',
+      default=None, type='int', help='latent size for attention adapter')
+  train_options.add_option('--lora_alpha', dest='lora_alpha',
+      default=None, type='int', help='lora alpha')
+  
+  train_options.add_option('--conv_select', dest='conv_select',
+      default=None, type="int", help='# of conv layers to insert locon.')
+  train_options.add_option('--conv_rank', dest='locon_rank',
+      default=None, type='int', help='locon/se conv rank.')
+  train_options.add_option('--locon_alpha', dest='locon_alpha',
+      default=None, type='int', help='locon alpha.')
+  
+  parser.add_option_group(train_options)  
+  
 
   # eval
   eval_options = OptionGroup(parser, 'hound_eval.py options')
@@ -100,9 +122,6 @@ def main():
   rep_options.add_option('-q', dest='queue',
       default='titan_rtx',
       help='SLURM queue on which to run the jobs [Default: %default]')
-  rep_options.add_option('--mem', dest='memory',
-      default=30000,
-      help='SLURM memory on which to run the jobs [Default: %default]')
   rep_options.add_option('-r', '--restart', dest='restart',
       default=False, action='store_true')
   rep_options.add_option('--setup', dest='setup',
@@ -113,6 +132,8 @@ def main():
   rep_options.add_option('--eval_off', dest='eval_off',
       default=False, action='store_true')
   rep_options.add_option('--eval_train_off', dest='eval_train_off',
+      default=False, action='store_true')
+  rep_options.add_option('--train_f3', dest='train_f3',
       default=False, action='store_true')
   parser.add_option_group(rep_options)
 
@@ -178,7 +199,7 @@ def main():
     exit(0)
 
   cmd_source = 'source /home/yuanh/.bashrc;'
-  hound_train = 'hound_train.py'
+  hound_train = 'hound_transfer.py'
   #######################################################
   # train
 
@@ -208,7 +229,11 @@ def main():
 
         cmd += ' %s' %hound_train
         cmd += ' %s' % options_string(options, train_options, rep_dir)
-        cmd += ' %s %s' % (params_file, ' '.join(rep_data_dirs))
+
+        if options.train_f3:
+            cmd += ' %s %s' % (params_file, 'train/f3c0/data0')
+        else:
+            cmd += ' %s %s' % (params_file, ' '.join(rep_data_dirs))
 
         name = '%s-train-f%dc%d' % (options.name, fi, ci)
         sbf = os.path.abspath('%s/train.sb' % rep_dir)
@@ -220,7 +245,7 @@ def main():
                       queue=options.queue,
                       cpu=4,
                       gpu=params_train.get('num_gpu',1),
-                      mem=options.memory, time='60-0:0:0')
+                      mem=30000, time='60-0:0:0')
         jobs.append(j)
 
   slurm.multi_run(jobs, max_proc=options.processes, verbose=True,
@@ -496,7 +521,7 @@ def options_string(options, train_options, rep_dir):
     elif opt.dest == 'restore':
       fold_dir_mid = rep_dir.split('/')[-1]
       if options.trunk:
-        opt_value = '%s/%s/train/model_trunk.h5' % (opt_value, fold_dir_mid)
+        opt_value = '%s/%s.h5' % (opt_value, fold_dir_mid)
       else:
         opt_value = '%s/%s/train/model_best.h5' % (opt_value, fold_dir_mid)
 

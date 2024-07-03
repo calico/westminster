@@ -24,6 +24,9 @@ import numpy as np
 
 import slurm
 
+# add module
+import sys
+sys.path.append('/home/yuanh/programs/source/python_packages/westminster')
 from westminster.multi import collect_scores, nonzero_h5
 
 """
@@ -94,6 +97,9 @@ def main():
   fold_options.add_option('--folds', dest='num_folds',
       default=None, type='int',
       help='Number of folds to evaluate [Default: %default]')
+  fold_options.add_option('--weight_file', dest='weight_file',
+      default='model_best.h5',
+      help='name of the model weight file to load [Default: model_best.h5]')
   fold_options.add_option('-g', dest='gtex_vcf_dir',
       default='/home/drk/seqnn/data/gtex_fine/susie_pip90r')
   fold_options.add_option('--name', dest='name',
@@ -125,13 +131,13 @@ def main():
   if options.num_folds is None:
     options.num_folds = 0
     fold0_dir = '%s/f%dc0' % (exp_dir, options.num_folds)
-    model_file = '%s/train/model_best.h5' % fold0_dir
+    model_file = '%s/train/%s' % (fold0_dir, options.weight_file)
     if options.data_head is not None:
       model_file = '%s/train/model%d_best.h5' % (fold0_dir, options.data_head)
     while os.path.isfile(model_file):
       options.num_folds += 1
       fold0_dir = '%s/f%dc0' % (exp_dir, options.num_folds)
-      model_file = '%s/train/model_best.h5' % fold0_dir
+      model_file = '%s/train/%s' % (fold0_dir, options.weight_file)
       if options.data_head is not None:
         model_file = '%s/train/model%d_best.h5' % (fold0_dir, options.data_head)
     print('Found %d folds' % options.num_folds)
@@ -152,7 +158,7 @@ def main():
   # SAD
 
   # SAD command base
-  cmd_base = '. /home/drk/anaconda3/etc/profile.d/conda.sh;'
+  cmd_base = 'source /home/yuanh/.bashrc;'
   cmd_base += ' conda activate %s;' % options.conda_env
   cmd_base += ' echo $HOSTNAME;'
 
@@ -168,7 +174,7 @@ def main():
       os.makedirs(it_out_dir, exist_ok=True)
 
       # choose model
-      model_file = '%s/train/model_best.h5' % it_dir
+      model_file = '%s/train/%s' % (it_dir, options.weight_file)
       if options.data_head is not None:
         model_file = '%s/train/model%d_best.h5' % (it_dir, options.data_head)
 
