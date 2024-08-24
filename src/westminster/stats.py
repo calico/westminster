@@ -18,7 +18,7 @@ import numpy as np
 from scipy.stats import wilcoxon, ttest_rel
 import seaborn as sns
 
-def jointplot(ref_cors, exp_cors, label1, label2, out_pdf=None):
+def jointplot(ref_cors, exp_cors, label1, label2, alpha=1, out_pdf=None, title=None):
     """"
     My preferred jointplot settings.
 
@@ -36,7 +36,7 @@ def jointplot(ref_cors, exp_cors, label1, label2, out_pdf=None):
     vmin -= vbuf
     vmax += vbuf
 
-    g = sns.jointplot(x=ref_cors, y=exp_cors, space=0)
+    g = sns.jointplot(x=ref_cors, y=exp_cors, space=0, joint_kws={"alpha": alpha})
 
     eps = 0.05
     g.ax_joint.text(
@@ -59,6 +59,8 @@ def jointplot(ref_cors, exp_cors, label1, label2, out_pdf=None):
     g.ax_joint.set_ylabel(label2)
 
     plt.tight_layout(w_pad=0, h_pad=0)
+    if title is not None:
+        plt.suptitle(title)
     if out_pdf is not None:
         plt.savefig(out_pdf)
 
