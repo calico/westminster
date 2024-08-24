@@ -44,7 +44,7 @@ def main():
     )
     parser.add_option("-l", dest="labels")
     parser.add_option("-o", dest="out_dir", default="compare_scores")
-    parser.add_option("--stats", dest="stats", default="logD2")
+    parser.add_option("-s", "--stats", dest="stats", default="logD2")
     parser.add_option(
         "-v",
         dest="min_variants",
