@@ -299,7 +299,7 @@ def main():
                         "%s/job%d.sb" % (options.out_dir, pi),
                         queue=options.queue,
                         gpu=1,
-                        cpu=2,
+                        cpu=4,
                         mem=30000,
                         time="7-0:0:0",
                     )
@@ -336,7 +336,7 @@ def main():
                         "%s/job%d.sb" % (options.out_dir, pi),
                         queue=options.queue,
                         gpu=1,
-                        cpu=2,
+                        cpu=4,
                         mem=30000,
                         time="7-0:0:0",
                     )
@@ -362,7 +362,7 @@ def main():
             pos_out_dir = "%s/merge_pos" % it_out_dir
             if not os.path.isfile("%s/scores.h5" % pos_out_dir):
                 collect_scores(pos_out_dir, options.processes)
-
+    
     ################################################################
     # split study/tissue variants
 
@@ -423,10 +423,12 @@ def main():
     ################################################################
     # fit classifiers
 
-    # SNPs
-    cmd_base = "westminster_classify.py -f 8 -i 100 -r 44 -s"
+    # SNPs (random forest) 
+    # cmd_base = "westminster_classify.py -f 8 -i 20 -n 512 -s"
+    # SNPs (xgboost)
+    cmd_base = "westminster_classify.py -f 8 -i 20 -n 96 -s -x"
     # indels
-    # cmd_base = 'westminster_classify.py -f 6 -i 64 -r 44 -s'
+    # cmd_base = 'westminster_classify.py -f 6 -i 64 -s'
     cmd_base += " --msl %d" % options.msl
 
     if options.class_targets_file is not None:
