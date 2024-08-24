@@ -2,7 +2,7 @@
 from optparse import OptionParser
 import joblib
 import os
-import pdb
+from tqdm import tqdm
 
 import h5py
 import matplotlib.pyplot as plt
@@ -13,6 +13,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import RidgeClassifier
 from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.model_selection import KFold
+import xgboost as xgb
 
 """
 westminster_classify.py
@@ -60,22 +61,36 @@ def main():
         dest="indel_scale",
         default=1,
         type="float",
-        help="Scale indel SAD  [Default: %default]",
+        help="Scale indel scores [Default: %default]",
     )
     parser.add_option(
         "-l",
-        dest="log",
-        default=False,
-        action="store_true",
-        help="Take features arcsinh [Default: %default]",
+        dest="learning_rate",
+        default=0.05,
+        type="float",
+        help="XGBoost learning rate [Default: %default]",
     )
     parser.add_option("-m", dest="model_pkl", help="Dimension reduction model")
+    parser.add_option(
+        "--md",
+        dest="max_depth",
+        default=4,
+        type="int",
+        help="XGBoost max_depth [Default: %default]",
+    )
     parser.add_option(
         "--msl",
         dest="msl",
         default=1,
         type="int",
-        help="Random forest min_samples_leaf [Default: %default]",
+        help="RandomForest min_samples_leaf [Default: %default]",
+    )
+    parser.add_option(
+        "-n",
+        dest="n_estimators",
+        default=100,
+        type="int",
+        help="RandomForest / XGBoost n_estimators [Default: %default]",
     )
     parser.add_option(
         "-o",
@@ -94,8 +109,15 @@ def main():
     parser.add_option(
         "--stat",
         dest="sad_stat",
-        default="SAD",
+        default="logD2",
         help="HDF5 key stat to consider. [Default: %default]",
+    )
+    parser.add_option(
+        "-x",
+        dest="xgboost",
+        default=False,
+        action="store_true",
+        help="Use XGBoost [Default: %default]",
     )
     parser.add_option("-t", dest="targets_file", default=None)
     (options, args) = parser.parse_args()
@@ -127,9 +149,6 @@ def main():
     Xn = read_stats(sadn_file, options.sad_stat, target_slice)
 
     # transformations
-    if options.log:
-        Xp = np.arcsinh(Xp)
-        Xn = np.arcsinh(Xn)
     if options.abs_value:
         Xp = np.abs(Xp)
         Xn = np.abs(Xn)
@@ -157,30 +176,51 @@ def main():
 
     # train classifier
     if X.shape[1] == 1:
-        aurocs, fpr_folds, tpr_folds, fpr_mean, tpr_mean = fold_roc(X, y, folds=8)
+        aurocs, fpr_folds, tpr_folds, fpr_mean, tpr_mean = folds_single(X, y, folds=8)
 
         # save preds
         if options.save_preds:
             np.save("%s/preds.npy" % options.out_dir, X)
     else:
-        # if options.classifier_type == 'ridge':
-        #   aurocs, fpr_folds, tpr_folds, fpr_full, tpr_full = ridge_roc(X, y, folds=8, alpha=10000)
-        # else:
-        aurocs, fpr_folds, tpr_folds, fpr_mean, tpr_mean, preds = randfor_roc(
-            X,
-            y,
-            folds=options.num_folds,
-            iterations=options.iterations,
-            min_samples_leaf=options.msl,
-            random_state=options.random_seed,
-        )
+        if options.xgboost:
+            aurocs, fpr_folds, tpr_folds, fpr_mean, tpr_mean, preds = folds_xgboost(
+                X,
+                y,
+                folds=options.num_folds,
+                iterations=options.iterations,
+                n_estimators=options.n_estimators,
+                max_depth=options.max_depth,
+                learning_rate=options.learning_rate,
+                random_state=options.random_seed,
+            )
+        else:
+            aurocs, fpr_folds, tpr_folds, fpr_mean, tpr_mean, preds = folds_randfor(
+                X,
+                y,
+                folds=options.num_folds,
+                iterations=options.iterations,
+                n_estimators=options.n_estimators,
+                min_samples_leaf=options.msl,
+                random_state=options.random_seed,
+            )
 
         # save preds
         if options.save_preds:
             np.save("%s/preds.npy" % options.out_dir, preds)
 
         # save full model
-        model = randfor_full(X, y, min_samples_leaf=options.msl)
+        if options.xgboost:
+            model = full_xgboost(
+                X,
+                y,
+                n_estimators=options.n_estimators,
+                max_depth=options.max_depth,
+                learning_rate=options.learning_rate,
+            )
+        else:
+            model = full_randfor(
+                X, y, n_estimators=options.n_estimators, min_samples_leaf=options.msl
+            )
         joblib.dump(model, "%s/model.pkl" % options.out_dir)
 
     # save
@@ -198,7 +238,96 @@ def main():
     plot_roc(fpr_folds, tpr_folds, options.out_dir)
 
 
-def fold_roc(X: np.array, y: np.array, folds: int = 8, random_state: int = 44):
+def folds_randfor(
+    X: np.array,
+    y: np.array,
+    folds: int = 8,
+    iterations: int = 1,
+    n_estimators: int = 100,
+    min_samples_leaf: int = 1,
+    random_state: int = 44,
+):
+    """
+    Fit random forest classifiers in cross-validation.
+
+    Args:
+      X (:obj:`np.array`):
+        Feature matrix.
+      y (:obj:`np.array`):
+        Target values.
+      folds (:obj:`int`):
+        Cross folds.
+      iterations (:obj:`int`):
+        Cross fold iterations.
+      n_estimators (:obj:`int`):
+        Number of trees in the forest.
+      min_samples_leaf (:obj:`float`):
+        Minimum number of samples required to be at a leaf node.
+      random_state (:obj:`int`):
+        sklearn random_state.
+    """
+    aurocs = []
+    fpr_folds = []
+    tpr_folds = []
+    fpr_fulls = []
+    tpr_fulls = []
+    preds_return = []
+
+    fpr_mean = np.linspace(0, 1, 256)
+    tpr_mean = []
+
+    for i in tqdm(range(iterations)):
+        rs_iter = random_state + i
+        preds_full = np.zeros(y.shape)
+
+        kf = KFold(n_splits=folds, shuffle=True, random_state=rs_iter)
+
+        for train_index, test_index in kf.split(X):
+            # fit model
+            if random_state is None:
+                rs_rf = None
+            else:
+                rs_rf = rs_iter + test_index[0]
+            model = RandomForestClassifier(
+                n_estimators=n_estimators,
+                max_features="log2",
+                min_samples_leaf=min_samples_leaf,
+                random_state=rs_rf,
+                n_jobs=-1,
+            )
+            model.fit(X[train_index, :], y[train_index])
+
+            # predict test set
+            preds = model.predict_proba(X[test_index, :])[:, 1]
+
+            # save
+            preds_full[test_index] = preds.squeeze()
+
+            # compute ROC curve
+            fpr, tpr, _ = roc_curve(y[test_index], preds)
+            fpr_folds.append(fpr)
+            tpr_folds.append(tpr)
+
+            interp_tpr = np.interp(fpr_mean, fpr, tpr)
+            interp_tpr[0] = 0.0
+            tpr_mean.append(interp_tpr)
+
+            # compute AUROC
+            aurocs.append(roc_auc_score(y[test_index], preds))
+
+        fpr_full, tpr_full, _ = roc_curve(y, preds_full)
+        fpr_fulls.append(fpr_full)
+        tpr_fulls.append(tpr_full)
+        preds_return.append(preds_full)
+
+    aurocs = np.array(aurocs)
+    tpr_mean = np.array(tpr_mean).mean(axis=0)
+    preds_return = np.array(preds_return).T
+
+    return aurocs, fpr_folds, tpr_folds, fpr_mean, tpr_mean, preds_return
+
+
+def folds_single(X: np.array, y: np.array, folds: int = 8, random_state: int = 44):
     """
     Compute ROC for a single value, sans model.
 
@@ -248,75 +377,14 @@ def fold_roc(X: np.array, y: np.array, folds: int = 8, random_state: int = 44):
     )
 
 
-def plot_roc(fprs: np.array, tprs: np.array, out_dir: str):
-    """
-    Plot ROC curve.
-
-    Args:
-      fprs (:obj:`np.array`):
-        False positive rates
-      tprs (:obj:`np.array`):
-        True positive rates.
-      out_dir (:obj:`str`):
-        Output directory.
-    """
-    plt.figure(figsize=(4, 4))
-
-    for fi in range(len(fprs)):
-        plt.plot(fprs[fi], tprs[fi], alpha=0.25)
-
-    ax = plt.gca()
-    ax.set_xlabel("False positive rate")
-    ax.set_ylabel("True positive rate")
-
-    sns.despine()
-    plt.tight_layout()
-
-    plt.savefig("%s/roc.pdf" % out_dir)
-    plt.close()
-
-
-def randfor_full(
-    X: np.array,
-    y: np.array,
-    n_estimators: int = 100,
-    min_samples_leaf: int = 1,
-    random_state: int = 44,
-):
-    """
-    Fit a single random forest on the full data.
-
-    Args:
-      X (:obj:`np.array`):
-        Feature matrix.
-      y (:obj:`np.array`):
-        Target values.
-      n_estimators (:obj:`int`):
-        Number of trees in the forest.
-      min_samples_leaf (:obj:`float`):
-        Minimum number of samples required to be at a leaf node.
-      random_state (:obj:`int`):
-        sklearn random_state.
-    """
-    model = RandomForestClassifier(
-        n_estimators=n_estimators,
-        max_features="log2",
-        max_depth=64,
-        min_samples_leaf=min_samples_leaf,
-        random_state=random_state,
-        n_jobs=-1,
-    )
-    model.fit(X, y)
-    return model
-
-
-def randfor_roc(
+def folds_xgboost(
     X: np.array,
     y: np.array,
     folds: int = 8,
     iterations: int = 1,
-    n_estimators: int = 100,
-    min_samples_leaf: int = 1,
+    n_estimators: int = 32,
+    max_depth: int = 4,
+    learning_rate: float = 0.05,
     random_state: int = 44,
 ):
     """
@@ -333,8 +401,10 @@ def randfor_roc(
         Cross fold iterations.
       n_estimators (:obj:`int`):
         Number of trees in the forest.
-      min_samples_leaf (:obj:`float`):
-        Minimum number of samples required to be at a leaf node.
+      max_depth (:obj:`int`):
+        Maximum tree depth.
+      learning_rate (:obj:`float`):
+        Boosting learning rate.
       random_state (:obj:`int`):
         sklearn random_state.
     """
@@ -348,7 +418,7 @@ def randfor_roc(
     fpr_mean = np.linspace(0, 1, 256)
     tpr_mean = []
 
-    for i in range(iterations):
+    for i in tqdm(range(iterations)):
         rs_iter = random_state + i
         preds_full = np.zeros(y.shape)
 
@@ -360,14 +430,21 @@ def randfor_roc(
                 rs_rf = None
             else:
                 rs_rf = rs_iter + test_index[0]
-            model = RandomForestClassifier(
+
+            model = xgb.XGBClassifier(
                 n_estimators=n_estimators,
-                max_features="log2",
-                max_depth=64,
-                min_samples_leaf=min_samples_leaf,
-                random_state=rs_rf,
+                max_depth=max_depth,
+                learning_rate=learning_rate,
                 n_jobs=-1,
+                colsample_bytree=0.5,
+                min_child_weight=2,
+                random_state=rs_rf,
             )
+            # colsample_bytree=1/np.sqrt(X.shape[1]),
+            # min_child_weight=[1,2],
+            # subsample=1,
+            # reg_alpha=1,
+
             model.fit(X[train_index, :], y[train_index])
 
             # predict test set
@@ -400,85 +477,103 @@ def randfor_roc(
     return aurocs, fpr_folds, tpr_folds, fpr_mean, tpr_mean, preds_return
 
 
-def ridge_roc(
+def full_randfor(
     X: np.array,
     y: np.array,
-    folds: int = 8,
-    iterations: int = 1,
-    alpha: float = 1,
+    n_estimators: int = 100,
+    min_samples_leaf: int = 1,
     random_state: int = 44,
 ):
     """
-    Fit ridge classifiers in cross-validation.
+    Fit a single random forest on the full data.
 
     Args:
       X (:obj:`np.array`):
         Feature matrix.
       y (:obj:`np.array`):
         Target values.
-      folds (:obj:`int`):
-        Cross folds.
-      iterations (:obj:`int`):
-        Cross fold iterations.
-      alpha (:obj:`float`):
-        Ridge alpha coefficient.
+      n_estimators (:obj:`int`):
+        Number of trees in the forest.
+      min_samples_leaf (:obj:`float`):
+        Minimum number of samples required to be at a leaf node.
       random_state (:obj:`int`):
         sklearn random_state.
     """
+    model = RandomForestClassifier(
+        n_estimators=n_estimators,
+        max_features="log2",
+        min_samples_leaf=min_samples_leaf,
+        random_state=random_state,
+        n_jobs=-1,
+    )
+    model.fit(X, y)
+    return model
 
-    aurocs = []
-    fpr_folds = []
-    tpr_folds = []
-    fpr_fulls = []
-    tpr_fulls = []
-    preds_return = []
 
-    fpr_mean = np.linspace(0, 1, 256)
-    tpr_mean = []
+def full_xgboost(
+    X: np.array,
+    y: np.array,
+    n_estimators: int = 32,
+    max_depth: int = 4,
+    learning_rate: float = 0.05,
+    random_state: int = 44,
+):
+    """
+    Fit a single xgboost forest on the full data.
 
-    for i in range(iterations):
-        rs_iter = random_state + i
-        preds_full = np.zeros(y.shape)
+    Args:
+      X (:obj:`np.array`):
+        Feature matrix.
+      y (:obj:`np.array`):
+        Target values.
+      n_estimators (:obj:`int`):
+        Number of trees in the forest.
+      max_depth (:obj:`int`):
+        Maximum tree depth.
+      learning_rate (:obj:`float`):
+        Boosting learning rate.
+      random_state (:obj:`int`):
+        sklearn random_state.
+    """
+    model = xgb.XGBClassifier(
+        n_estimators=n_estimators,
+        max_depth=max_depth,
+        learning_rate=learning_rate,
+        objective="binary:logistic",
+        n_jobs=-1,
+        colsample_bytree=0.5,
+        random_state=random_state,
+    )
+    model.fit(X, y)
+    return model
 
-        kf = KFold(n_splits=folds, shuffle=True, random_state=rs_iter)
 
-        for train_index, test_index in kf.split(X):
-            # fit model
-            if random_state is None:
-                rs_rf = None
-            else:
-                rs_rf = rs_iter + test_index[0]
-            model = RidgeClassifier(alpha=alpha, random_state=rs_rf)
-            model.fit(X[train_index, :], y[train_index])
+def plot_roc(fprs: np.array, tprs: np.array, out_dir: str):
+    """
+    Plot ROC curve.
 
-            # predict test set
-            preds = model._predict_proba_lr(X[test_index, :])[:, 1]
+    Args:
+      fprs (:obj:`np.array`):
+        False positive rates
+      tprs (:obj:`np.array`):
+        True positive rates.
+      out_dir (:obj:`str`):
+        Output directory.
+    """
+    plt.figure(figsize=(4, 4))
 
-            # save
-            preds_full[test_index] = preds.squeeze()
+    for fi in range(len(fprs)):
+        plt.plot(fprs[fi], tprs[fi], alpha=0.25)
 
-            # compute ROC curve
-            fpr, tpr, _ = roc_curve(y[test_index], preds)
-            fpr_folds.append(fpr)
-            tpr_folds.append(tpr)
+    ax = plt.gca()
+    ax.set_xlabel("False positive rate")
+    ax.set_ylabel("True positive rate")
 
-            interp_tpr = np.interp(fpr_mean, fpr, tpr)
-            interp_tpr[0] = 0.0
-            tpr_mean.append(interp_tpr)
+    sns.despine()
+    plt.tight_layout()
 
-            # compute AUROC
-            aurocs.append(roc_auc_score(y[test_index], preds))
-
-        fpr_full, tpr_full, _ = roc_curve(y, preds_full)
-        fpr_fulls.append(fpr_full)
-        tpr_fulls.append(tpr_full)
-        preds_return.append(preds_full)
-
-    aurocs = np.array(aurocs)
-    tpr_mean = np.array(tpr_mean).mean(axis=0)
-    preds_return = np.array(preds_return).T
-
-    return aurocs, fpr_folds, tpr_folds, fpr_mean, tpr_mean, preds_return
+    plt.savefig("%s/roc.pdf" % out_dir)
+    plt.close()
 
 
 def read_indel(h5_file, indel_abs=True, indel_bool=False):
