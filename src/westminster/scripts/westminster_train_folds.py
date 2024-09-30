@@ -87,38 +87,6 @@ def main():
     )
     parser.add_option_group(train_options)
 
-    # eval
-    eval_options = OptionGroup(parser, "hound_eval.py options")
-    eval_options.add_option(
-        "--rank",
-        dest="rank_corr",
-        default=False,
-        action="store_true",
-        help="Compute Spearman rank correlation [Default: %default]",
-    )
-    eval_options.add_option(
-        "--rc",
-        dest="rc",
-        default=False,
-        action="store_true",
-        help="Average forward and reverse complement predictions [Default: %default]",
-    )
-    eval_options.add_option(
-        "--shifts",
-        dest="shifts",
-        default="0",
-        type="str",
-        help="Ensemble prediction shifts [Default: %default]",
-    )
-    parser.add_option(
-        "--step",
-        dest="step",
-        default=1,
-        type="int",
-        help="Spatial step for specificity/spearmanr [Default: %default]",
-    )
-    parser.add_option_group(eval_options)
-
     # multi
     rep_options = OptionGroup(parser, "replication options")
     rep_options.add_option(
@@ -282,11 +250,8 @@ def main():
                 for di in range(num_data):
                     rep_data_dirs.append("%s/data%d" % (rep_dir, di))
 
-                # if options.checkpoint:
-                #   os.rename('%s/train.out' % rep_dir, '%s/train1.out' % rep_dir)
-
                 # train command
-                cmd = ('. %s; ' % os.environ['BORZOI_CONDA']) if 'BORZOI_CONDA' in os.environ else ''
+                cmd = ('. %s; ' % os.environ['BASKERVILLE_CONDA']) if 'BASKERVILLE_CONDA' in os.environ else ''
                 cmd += "conda activate %s;" % options.conda_env
                 cmd += " echo $HOSTNAME;"
 

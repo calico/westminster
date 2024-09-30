@@ -165,6 +165,12 @@ def main():
         help="Number of folds to evaluate [Default: %default]",
     )
     fold_options.add_option(
+        "--f_list",
+        dest="fold_subset_list",
+        default=None,
+        help="Subset of folds to evaluate (encoded as comma-separated string) [Default:%default]",
+    )
+    fold_options.add_option(
         "-g",
         "--gtex",
         dest="gtex_vcf_dir",
@@ -233,6 +239,13 @@ def main():
         print("Found %d folds" % options.num_folds)
         if options.num_folds == 0:
             exit(1)
+    
+    # subset folds
+    fold_index = [fold_i for fold_i in range(options.num_folds)]
+
+    # subset folds (list)
+    if options.fold_subset_list is not None:
+        fold_index = [int(fold_str) for fold_str in options.fold_subset_list.split(",")]
 
     # extract output subdirectory name
     gtex_out_dir = options.out_dir
@@ -248,14 +261,14 @@ def main():
     # SAD
 
     # SAD command base
-    cmd_base = ". /home/drk/anaconda3/etc/profile.d/conda.sh;"
-    cmd_base += " conda activate %s;" % options.conda_env
+    cmd_base = ('. %s; ' % os.environ['BASKERVILLE_CONDA']) if 'BASKERVILLE_CONDA' in os.environ else ''
+    cmd_base += "conda activate %s;" % options.conda_env
     cmd_base += " echo $HOSTNAME;"
 
     jobs = []
 
     for ci in range(options.crosses):
-        for fi in range(options.num_folds):
+        for fi in fold_index:
             it_dir = "%s/f%dc%d" % (exp_dir, fi, ci)
             name = "%s-f%dc%d" % (options.name, fi, ci)
 
@@ -350,7 +363,7 @@ def main():
     # collect output
 
     for ci in range(options.crosses):
-        for fi in range(options.num_folds):
+        for fi in fold_index:
             it_out_dir = "%s/f%dc%d/%s" % (exp_dir, fi, ci, gtex_out_dir)
 
             # collect negatives
@@ -367,7 +380,7 @@ def main():
     # split study/tissue variants
 
     for ci in range(options.crosses):
-        for fi in range(options.num_folds):
+        for fi in fold_index:
             it_out_dir = "%s/f%dc%d/%s" % (exp_dir, fi, ci, gtex_out_dir)
             print(it_out_dir)
 
@@ -397,7 +410,7 @@ def main():
         sad_pos_files = []
         sad_neg_files = []
         for ci in range(options.crosses):
-            for fi in range(options.num_folds):
+            for fi in fold_index:
                 it_dir = "%s/f%dc%d" % (exp_dir, fi, ci)
                 it_out_dir = "%s/%s" % (it_dir, gtex_out_dir)
 
@@ -436,7 +449,7 @@ def main():
 
     jobs = []
     for ci in range(options.crosses):
-        for fi in range(options.num_folds):
+        for fi in fold_index:
             it_dir = "%s/f%dc%d" % (exp_dir, fi, ci)
             it_out_dir = "%s/%s" % (it_dir, gtex_out_dir)
 
@@ -509,7 +522,7 @@ def main():
 
     jobs = []
     for ci in range(options.crosses):
-        for fi in range(options.num_folds):
+        for fi in fold_index:
             it_dir = "%s/f%dc%d" % (exp_dir, fi, ci)
             it_out_dir = "%s/%s" % (it_dir, gtex_out_dir)
             coef_out_dir = "%s/coef" % it_out_dir

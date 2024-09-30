@@ -205,7 +205,7 @@ def main():
                             print("%s already generated." % acc_file)
                         else:
                             # hound evaluate
-                            cmd = ('. %s; ' % os.environ['BORZOI_CONDA']) if 'BORZOI_CONDA' in os.environ else ''
+                            cmd = ('. %s; ' % os.environ['BASKERVILLE_CONDA']) if 'BASKERVILLE_CONDA' in os.environ else ''
                             cmd += "conda activate %s;" % options.conda_env
                             cmd += " echo $HOSTNAME;"
                             cmd += " hound_eval.py"
@@ -256,7 +256,7 @@ def main():
                         if os.path.isfile(acc_file):
                             print("%s already generated." % acc_file)
                         else:
-                            cmd = ('. %s; ' % os.environ['BORZOI_CONDA']) if 'BORZOI_CONDA' in os.environ else ''
+                            cmd = ('. %s; ' % os.environ['BASKERVILLE_CONDA']) if 'BASKERVILLE_CONDA' in os.environ else ''
                             cmd += "conda activate %s;" % options.conda_env
                             cmd += " echo $HOSTNAME;"
                             cmd += " hound_eval_spec.py"
