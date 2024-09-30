@@ -40,7 +40,7 @@ def main():
     parser = OptionParser(usage)
 
     # train
-    train_options = OptionGroup(parser, "houndtrain.py options")
+    train_options = OptionGroup(parser, "hound_train.py options")
     train_options.add_option(
         "-k",
         dest="keras_fit",
@@ -149,6 +149,12 @@ def main():
         help="Run a subset of folds [Default:%default]",
     )
     rep_options.add_option(
+        "--f_list",
+        dest="fold_subset_list",
+        default=None,
+        help="Run a subset of folds (encoded as comma-separated string) [Default:%default]",
+    )
+    rep_options.add_option(
         "--name",
         dest="name",
         default="fold",
@@ -168,7 +174,11 @@ def main():
         help="SLURM queue on which to run the jobs [Default: %default]",
     )
     rep_options.add_option(
-        "-r", "--restart", dest="restart", default=False, action="store_true"
+        "-r",
+        "--restart",
+        dest="restart",
+        default=False,
+        action="store_true"
     )
     rep_options.add_option(
         "--setup",
@@ -178,13 +188,11 @@ def main():
         help="Setup folds data directory only [Default: %default]",
     )
     rep_options.add_option(
-        "--spec_off", dest="spec_off", default=False, action="store_true"
-    )
-    rep_options.add_option(
-        "--eval_off", dest="eval_off", default=False, action="store_true"
-    )
-    rep_options.add_option(
-        "--eval_train_off", dest="eval_train_off", default=False, action="store_true"
+        "--identical_crosses",
+        dest="identical_crosses",
+        default=False,
+        action="store_true",
+        help="Force all crosses to use the same validation fold [Default: %default]",
     )
     parser.add_option_group(rep_options)
 
@@ -224,6 +232,12 @@ def main():
     # subset folds
     if options.fold_subset is not None:
         num_folds = min(options.fold_subset, num_folds)
+  
+    fold_index = [fold_i for fold_i in range(num_folds)]
+
+    # subset folds (list)
+    if options.fold_subset_list is not None:
+        fold_index = [int(fold_str) for fold_str in options.fold_subset_list.split(",")]
 
     if options.queue == "standard":
         num_cpu = 8
@@ -236,7 +250,7 @@ def main():
 
     # arrange data
     for ci in range(options.crosses):
-        for fi in range(num_folds):
+        for fi in fold_index:
             rep_dir = "%s/f%dc%d" % (options.out_dir, fi, ci)
             os.makedirs(rep_dir, exist_ok=True)
 
@@ -244,7 +258,7 @@ def main():
             for di in range(num_data):
                 rep_data_dir = "%s/data%d" % (rep_dir, di)
                 if not os.path.isdir(rep_data_dir):
-                    make_rep_data(data_dirs[di], rep_data_dir, fi, ci)
+                    make_rep_data(data_dirs[di], rep_data_dir, fi, ci, options.identical_crosses)
 
     if options.setup:
         exit(0)
@@ -255,7 +269,7 @@ def main():
     jobs = []
 
     for ci in range(options.crosses):
-        for fi in range(num_folds):
+        for fi in fold_index:
             rep_dir = "%s/f%dc%d" % (options.out_dir, fi, ci)
 
             train_dir = "%s/train" % rep_dir
@@ -272,8 +286,8 @@ def main():
                 #   os.rename('%s/train.out' % rep_dir, '%s/train1.out' % rep_dir)
 
                 # train command
-                cmd = ". /home/drk/anaconda3/etc/profile.d/conda.sh;"
-                cmd += " conda activate %s;" % options.conda_env
+                cmd = ('. %s; ' % os.environ['BORZOI_CONDA']) if 'BORZOI_CONDA' in os.environ else ''
+                cmd += "conda activate %s;" % options.conda_env
                 cmd += " echo $HOSTNAME;"
 
                 cmd += " hound_train.py"
@@ -304,7 +318,7 @@ def main():
     )
 
 
-def make_rep_data(data_dir, rep_data_dir, fi, ci):
+def make_rep_data(data_dir, rep_data_dir, fi, ci, identical_crosses):
     # read data parameters
     data_stats_file = "%s/statistics.json" % data_dir
     with open(data_stats_file) as data_stats_open:
@@ -322,6 +336,8 @@ def make_rep_data(data_dir, rep_data_dir, fi, ci):
     # split folds into train/valid/test
     test_fold = fi
     valid_fold = (fi + 1 + ci) % num_folds
+    if identical_crosses:
+        valid_fold = (fi + 1) % num_folds
     train_folds = [
         fold for fold in range(num_folds) if fold not in [valid_fold, test_fold]
     ]
