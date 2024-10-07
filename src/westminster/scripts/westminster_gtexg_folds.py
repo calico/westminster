@@ -55,10 +55,24 @@ def main():
         help="Genome FASTA for sequences [Default: %default]",
     )
     snp_options.add_option(
+        "--float16",
+        dest="float16",
+        default=False,
+        action="store_true",
+        help="Use mixed float16 precision [Default: %default]",
+    )
+    snp_options.add_option(
         "-g",
         dest="genes_gtf",
         default="%s/genes/gencode41/gencode41_basic_nort.gtf" % os.environ["HG38"],
         help="GTF for gene definition [Default %default]",
+    )
+    snp_options.add_option(
+        "--indel_stitch",
+        dest="indel_stitch",
+        default=False,
+        action="store_true",
+        help="Stitch indel compensation shifts [Default: %default]",
     )
     snp_options.add_option(
         "-o",
