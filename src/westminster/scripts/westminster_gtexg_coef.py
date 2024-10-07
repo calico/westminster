@@ -165,7 +165,7 @@ def read_eqtl(tissue: str, gtex_vcf_dir: str, pip_t: float = 0.9):
     df_eqtl = pd.read_csv(eqtl_file, sep="\t", index_col=0)
 
     # pip filter
-    pip_match = re.search(r"_pip(\d+).?$", gtex_vcf_dir).group(1)
+    pip_match = re.search(r"_pip(\d+).+$", gtex_vcf_dir).group(1)
     pip_t = float(pip_match) / 100
     assert pip_t > 0 and pip_t <= 1
     df_causal = df_eqtl[df_eqtl.pip > pip_t]
