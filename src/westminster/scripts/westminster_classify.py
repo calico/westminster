@@ -3,6 +3,7 @@ from optparse import OptionParser
 import joblib
 import os
 from tqdm import tqdm
+from typing import List
 
 import h5py
 import matplotlib.pyplot as plt
@@ -10,7 +11,6 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import RidgeClassifier
 from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.model_selection import KFold
 import xgboost as xgb
@@ -108,7 +108,7 @@ def main():
     )
     parser.add_option(
         "--stat",
-        dest="sad_stat",
+        dest="score_keys",
         default="logD2",
         help="HDF5 key stat to consider. [Default: %default]",
     )
@@ -130,6 +130,9 @@ def main():
 
     np.random.seed(options.random_seed)
 
+    # convert comma-separated keys to list
+    options.score_keys = options.score_keys.split(",")
+
     if not os.path.isdir(options.out_dir):
         os.mkdir(options.out_dir)
 
@@ -145,8 +148,8 @@ def main():
         target_slice = targets_df.index
 
     # read positive/negative variants
-    Xp = read_stats(sadp_file, options.sad_stat, target_slice)
-    Xn = read_stats(sadn_file, options.sad_stat, target_slice)
+    Xp = read_scores(sadp_file, options.score_keys, target_slice)
+    Xn = read_scores(sadn_file, options.score_keys, target_slice)
 
     # transformations
     if options.abs_value:
@@ -606,31 +609,30 @@ def read_indel(h5_file, indel_abs=True, indel_bool=False):
     return indels
 
 
-def read_stats(stats_h5_file: str, stat_key: str, target_slice: np.array):
+def read_scores(stats_h5_file: str, score_keys: List[str], target_slice: np.array):
     """
-    Read stats from HDF5 file.
+    Read variant scores from HDF5 file.
 
     Args:
       stats_h5_file (:obj:`str`):
         Stats HDF5 file.
-      stat_key (:obj:`str`):
-        Stat HDF5 key.
+      score_keys (:obj:`List[str]`):
+        Stat HDF5 keys.
       target_slice (:obj:`np.array`):
         Target axis slice.
     """
+    scores = []
     with h5py.File(stats_h5_file, "r") as stats_h5:
-        sad = stats_h5[stat_key][:]
-        # TEMP - insertions only
-        # ref = [ra.decode('UTF-8') for ra in stats_h5['ref_allele']]
-        # alt = [aa.decode('UTF-8') for aa in stats_h5['alt_allele']]
-        # num_snps = len(ref)
-        # indel = np.array([len(alt[si]) - len(ref[si]) for si in range(num_snps)])
-        # sad = sad[indel < 0]
-    if target_slice is not None:
-        sad = sad[..., target_slice]
-    sad = np.nan_to_num(sad).astype("float32")
-    return sad
+      for sk in score_keys:
+          score = stats_h5[sk][:]
+          if target_slice is not None:
+            score = score[..., target_slice]
+          score = np.nan_to_num(score).astype("float32")
+          scores.append(score)
 
+    # S x V x T to V x (ST)
+    scores = np.concatenate(scores, axis=-1)
+    return scores
 
 ################################################################################
 # __main__
