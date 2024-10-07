@@ -2,7 +2,6 @@
 
 # set these variables before running the script
 LOCAL_WESTMINSTER_PATH="/home/jlinder/westminster"
-LOCAL_USER="jlinder"
 
 # create env_vars sh scripts in local conda env
 mkdir -p "$CONDA_PREFIX/etc/conda/activate.d"
