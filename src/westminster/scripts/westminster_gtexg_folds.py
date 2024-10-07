@@ -163,6 +163,19 @@ def main():
         help="Anaconda environment [Default: %default]",
     )
     fold_options.add_option(
+        "--folds",
+        dest="num_folds",
+        default=None,
+        type="int",
+        help="Number of folds to evaluate [Default: %default]",
+    )
+    fold_options.add_option(
+        "--f_list",
+        dest="fold_subset_list",
+        default=None,
+        help="Subset of folds to evaluate (encoded as comma-separated string) [Default:%default]",
+    )
+    fold_options.add_option(
         "--gtex",
         dest="gtex_vcf_dir",
         default="/home/drk/seqnn/data/gtex_fine/susie_pip90",
@@ -208,20 +221,28 @@ def main():
     # prep work
 
     # count folds
-    num_folds = 0
-    fold0_dir = "%s/f%dc0" % (exp_dir, num_folds)
-    model_file = "%s/train/model_best.h5" % fold0_dir
-    if options.data_head is not None:
-        model_file = "%s/train/model%d_best.h5" % (fold0_dir, options.data_head)
-    while os.path.isfile(model_file):
-        num_folds += 1
-        fold0_dir = "%s/f%dc0" % (exp_dir, num_folds)
+    if options.num_folds is None:
+        options.num_folds = 0
+        fold0_dir = "%s/f%dc0" % (exp_dir, options.num_folds)
         model_file = "%s/train/model_best.h5" % fold0_dir
         if options.data_head is not None:
             model_file = "%s/train/model%d_best.h5" % (fold0_dir, options.data_head)
-    print("Found %d folds" % num_folds)
-    if num_folds == 0:
-        exit(1)
+        while os.path.isfile(model_file):
+            options.num_folds += 1
+            fold0_dir = "%s/f%dc0" % (exp_dir, options.num_folds)
+            model_file = "%s/train/model_best.h5" % fold0_dir
+            if options.data_head is not None:
+                model_file = "%s/train/model%d_best.h5" % (fold0_dir, options.data_head)
+        print("Found %d folds" % options.num_folds)
+        if options.num_folds == 0:
+            exit(1)
+    
+    # subset folds
+    fold_index = [fold_i for fold_i in range(options.num_folds)]
+
+    # subset folds (list)
+    if options.fold_subset_list is not None:
+        fold_index = [int(fold_str) for fold_str in options.fold_subset_list.split(",")]
 
     # extract output subdirectory name
     gtex_out_dir = options.out_dir
@@ -237,14 +258,14 @@ def main():
     # SED
 
     # SED command base
-    cmd_base = ". /home/drk/anaconda3/etc/profile.d/conda.sh;"
-    cmd_base += " conda activate %s;" % options.conda_env
+    cmd_base = ('. %s; ' % os.environ['BASKERVILLE_CONDA']) if 'BASKERVILLE_CONDA' in os.environ else ''
+    cmd_base += "conda activate %s;" % options.conda_env
     cmd_base += " echo $HOSTNAME;"
 
     jobs = []
 
     for ci in range(options.crosses):
-        for fi in range(num_folds):
+        for fi in fold_index:
             it_dir = "%s/f%dc%d" % (exp_dir, fi, ci)
             name = "%s-f%dc%d" % (options.name, fi, ci)
 
@@ -339,7 +360,7 @@ def main():
     # collect output
 
     for ci in range(options.crosses):
-        for fi in range(num_folds):
+        for fi in fold_index:
             it_out_dir = "%s/f%dc%d/%s" % (exp_dir, fi, ci, gtex_out_dir)
 
             # collect negatives
@@ -358,7 +379,7 @@ def main():
     # split study/tissue variants
 
     for ci in range(options.crosses):
-        for fi in range(num_folds):
+        for fi in fold_index:
             it_out_dir = "%s/f%dc%d/%s" % (exp_dir, fi, ci, gtex_out_dir)
             print(f"Splitting {it_out_dir}")
 
@@ -389,7 +410,7 @@ def main():
         score_pos_files = []
         score_neg_files = []
         for ci in range(options.crosses):
-            for fi in range(num_folds):
+            for fi in fold_index:
                 it_dir = "%s/f%dc%d" % (exp_dir, fi, ci)
                 it_out_dir = "%s/%s" % (it_dir, gtex_out_dir)
 
@@ -419,7 +440,7 @@ def main():
 
     jobs = []
     for ci in range(options.crosses):
-        for fi in range(num_folds):
+        for fi in fold_index:
             it_dir = "%s/f%dc%d" % (exp_dir, fi, ci)
             it_out_dir = "%s/%s" % (it_dir, gtex_out_dir)
 

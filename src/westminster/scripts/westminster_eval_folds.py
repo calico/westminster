@@ -96,6 +96,12 @@ def main():
         help="Run a subset of folds [Default:%default]",
     )
     rep_options.add_option(
+        "--f_list",
+        dest="fold_subset_list",
+        default=None,
+        help="Run a subset of folds (encoded as comma-separated string) [Default:%default]",
+    )
+    rep_options.add_option(
         "--name",
         dest="name",
         default="fold",
@@ -147,8 +153,14 @@ def main():
     num_folds = len([dkey for dkey in data_stats if dkey.startswith("fold")])
 
     # subset folds
-    if options.fold_subset is None:
-        options.fold_subset = num_folds
+    if options.fold_subset is not None:
+        num_folds = min(options.fold_subset, num_folds)
+  
+    fold_index = [fold_i for fold_i in range(num_folds)]
+
+    # subset folds (list)
+    if options.fold_subset_list is not None:
+        fold_index = [int(fold_str) for fold_str in options.fold_subset_list.split(",")]
 
     if options.queue == "standard":
         num_cpu = 16
@@ -165,7 +177,7 @@ def main():
     jobs = []
 
     for ci in range(options.crosses):
-        for fi in range(options.fold_subset):
+        for fi in fold_index:
             it_dir = "%s/f%dc%d" % (options.out_dir, fi, ci)
 
             for di in range(num_data):
@@ -179,7 +191,7 @@ def main():
                 if os.path.isfile(model_file):
                     os.makedirs(eval_dir, exist_ok=True)
 
-                    for ei in range(num_folds):
+                    for ei in fold_index:
                         eval_fold_dir = f"{eval_dir}/fold{ei}"
 
                         # symlink test metrics
@@ -193,8 +205,8 @@ def main():
                             print("%s already generated." % acc_file)
                         else:
                             # hound evaluate
-                            cmd = ". /home/drk/anaconda3/etc/profile.d/conda.sh;"
-                            cmd += " conda activate %s;" % options.conda_env
+                            cmd = ('. %s; ' % os.environ['BASKERVILLE_CONDA']) if 'BASKERVILLE_CONDA' in os.environ else ''
+                            cmd += "conda activate %s;" % options.conda_env
                             cmd += " echo $HOSTNAME;"
                             cmd += " hound_eval.py"
                             cmd += " --head %d" % di
@@ -227,7 +239,7 @@ def main():
 
     if options.spec:
         for ci in range(options.crosses):
-            for fi in range(num_folds):
+            for fi in fold_index:
                 it_dir = "%s/f%dc%d" % (options.out_dir, fi, ci)
 
                 for di in range(num_data):
@@ -244,8 +256,8 @@ def main():
                         if os.path.isfile(acc_file):
                             print("%s already generated." % acc_file)
                         else:
-                            cmd = ". /home/drk/anaconda3/etc/profile.d/conda.sh;"
-                            cmd += " conda activate %s;" % options.conda_env
+                            cmd = ('. %s; ' % os.environ['BASKERVILLE_CONDA']) if 'BASKERVILLE_CONDA' in os.environ else ''
+                            cmd += "conda activate %s;" % options.conda_env
                             cmd += " echo $HOSTNAME;"
                             cmd += " hound_eval_spec.py"
                             cmd += " --head %d" % di
