@@ -12,7 +12,7 @@ To set up the required environment variables:
 `conda activate <conda_env>`
 `./env_vars.sh`
 
-*Note:* Change the two lines of code at the top of './env_vars.sh' to your username and local path.
+*Note:* Change the line of code at the top of './env_vars.sh' to your local path.
 
 Alternatively, the environment variables can be set manually:
 ```sh
