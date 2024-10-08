@@ -152,14 +152,14 @@ def main():
     # count folds
     num_folds = len([dkey for dkey in data_stats if dkey.startswith("fold")])
 
-    # subset folds
+    # focus on initial folds
     if options.fold_subset is not None:
         num_folds = min(options.fold_subset, num_folds)
-  
-    fold_index = [fold_i for fold_i in range(num_folds)]
 
-    # subset folds (list)
-    if options.fold_subset_list is not None:
+    # select specific folds
+    if options.fold_subset_list is None:
+        fold_index = [fold_i for fold_i in range(num_folds)]
+    else:
         fold_index = [int(fold_str) for fold_str in options.fold_subset_list.split(",")]
 
     if options.queue == "standard":
@@ -187,11 +187,11 @@ def main():
                 else:
                     eval_dir = f"{it_dir}/eval{di}"
                     model_file = f"{it_dir}/train/model{di}_best.h5"
-        
+
                 if os.path.isfile(model_file):
                     os.makedirs(eval_dir, exist_ok=True)
 
-                    for ei in fold_index:
+                    for ei in range(num_folds):
                         eval_fold_dir = f"{eval_dir}/fold{ei}"
 
                         # symlink test metrics
@@ -205,7 +205,11 @@ def main():
                             print("%s already generated." % acc_file)
                         else:
                             # hound evaluate
-                            cmd = ('. %s; ' % os.environ['BASKERVILLE_CONDA']) if 'BASKERVILLE_CONDA' in os.environ else ''
+                            cmd = (
+                                (". %s; " % os.environ["BASKERVILLE_CONDA"])
+                                if "BASKERVILLE_CONDA" in os.environ
+                                else ""
+                            )
                             cmd += "conda activate %s;" % options.conda_env
                             cmd += " echo $HOSTNAME;"
                             cmd += " hound_eval.py"
@@ -256,7 +260,11 @@ def main():
                         if os.path.isfile(acc_file):
                             print("%s already generated." % acc_file)
                         else:
-                            cmd = ('. %s; ' % os.environ['BASKERVILLE_CONDA']) if 'BASKERVILLE_CONDA' in os.environ else ''
+                            cmd = (
+                                (". %s; " % os.environ["BASKERVILLE_CONDA"])
+                                if "BASKERVILLE_CONDA" in os.environ
+                                else ""
+                            )
                             cmd += "conda activate %s;" % options.conda_env
                             cmd += " echo $HOSTNAME;"
                             cmd += " hound_eval_spec.py"
