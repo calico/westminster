@@ -9,7 +9,7 @@ authors = [
     {name = "Calico f(DNA)", email = "drk@calicolabs.com"},
 ]
 readme = "README.md"
-classifiers = ["License :: OSI Approved :: MIT License"]
+classifiers = ["License :: OSI Approved :: Apache Software License"]
 dynamic = ["version"]
 
 requires-python = ">=3.9"

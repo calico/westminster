@@ -1,9 +1,0 @@
-name: westminster
-
-channels:
-  - defaults
-
-dependenceis:
-  - h5py
-  - numpy
-  - pandas
