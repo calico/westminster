@@ -60,6 +60,9 @@ def main():
   train_options.add_option('--tfr_eval', dest='tfr_eval_pattern',
       default=None,
       help='Evaluation TFR pattern string appended to data_dir/tfrecords for subsetting [Default: %default]')
+  train_options.add_option('--target', dest='target',
+      default=None,
+      help='specify target file.')
   parser.add_option_group(train_options)
 
   # eval
@@ -73,6 +76,9 @@ def main():
   eval_options.add_option('--shifts', dest='shifts',
       default='0', type='str',
       help='Ensemble prediction shifts [Default: %default]')
+  eval_options.add_option('--weight_file', dest='weight_file',
+      default='model_best.h5',
+      help='name of the model weight file to load [Default: model_best.h5]')
   parser.add_option('--step', dest='step',
       default=1, type='int',
       help='Spatial step for specificity/spearmanr [Default: %default]')
@@ -113,6 +119,10 @@ def main():
   rep_options.add_option('--eval_off', dest='eval_off',
       default=False, action='store_true')
   rep_options.add_option('--eval_train_off', dest='eval_train_off',
+      default=False, action='store_true')
+  rep_options.add_option('--train_f3', dest='train_f3',
+      default=False, action='store_true')
+  rep_options.add_option('--transfer', dest='transfer',
       default=False, action='store_true')
   parser.add_option_group(rep_options)
 
@@ -178,7 +188,11 @@ def main():
     exit(0)
 
   cmd_source = 'source /home/yuanh/.bashrc;'
-  hound_train = 'hound_train.py'
+
+  if options.transfer:
+    hound_train = 'hound_transfer.py'
+  else:
+    hound_train = 'hound_train.py'
   #######################################################
   # train
 
@@ -208,7 +222,11 @@ def main():
 
         cmd += ' %s' %hound_train
         cmd += ' %s' % options_string(options, train_options, rep_dir)
-        cmd += ' %s %s' % (params_file, ' '.join(rep_data_dirs))
+
+        if options.train_f3:
+          cmd += ' %s %s' % (params_file, 'train/f3c0/data0')
+        else:
+          cmd += ' %s %s' % (params_file, ' '.join(rep_data_dirs))
 
         name = '%s-train-f%dc%d' % (options.name, fi, ci)
         sbf = os.path.abspath('%s/train.sb' % rep_dir)
@@ -264,13 +282,18 @@ def main():
             cmd += ' --split train'
             cmd += ' %s' % params_file
             cmd += ' %s' % model_file
-            cmd += ' %s/data%d' % (it_dir, di)
 
+            if options.train_f3:
+              cmd += ' %s/f3c0/data%d' % (options.out_dir, di)
+            else:
+              cmd += ' %s/data%d' % (it_dir, di)
+            
             name = '%s-evaltr-f%dc%d' % (options.name, fi, ci)
             job = slurm.Job(cmd,
                             name=name,
                             out_file='%s.out'%out_dir,
                             err_file='%s.err'%out_dir,
+                            sb_file='%s.sb'%out_dir,
                             queue=options.queue,
                             cpu=num_cpu, gpu=num_gpu,
                             mem=30000,
@@ -289,7 +312,7 @@ def main():
         for di in range(num_data):
           if num_data == 1:
             out_dir = '%s/eval' % it_dir
-            model_file = '%s/train/model_best.h5' % it_dir
+            model_file = '%s/train/%s' % (it_dir, options.weight_file)
           else:
             out_dir = '%s/eval%d' % (it_dir, di)
             model_file = '%s/train/model%d_best.h5' % (it_dir, di)
@@ -314,13 +337,18 @@ def main():
               cmd += ' --step %d' % options.step
             cmd += ' %s' % params_file
             cmd += ' %s' % model_file
-            cmd += ' %s/data%d' % (it_dir, di)
-
+            
+            if options.train_f3:
+              cmd += ' %s/f3c0/data%d' % (options.out_dir, di)
+            else:
+              cmd += ' %s/data%d' % (it_dir, di)
+            
             name = '%s-eval-f%dc%d' % (options.name, fi, ci)
             job = slurm.Job(cmd,
                             name=name,
                             out_file='%s.out'%out_dir,
                             err_file='%s.err'%out_dir,
+                            sb_file='%s.sb'%out_dir,
                             queue=options.queue,
                             cpu=num_cpu, gpu=num_gpu,
                             mem=30000,
@@ -338,7 +366,7 @@ def main():
         for di in range(num_data):
           if num_data == 1:
             out_dir = '%s/eval_spec' % it_dir
-            model_file = '%s/train/model_best.h5' % it_dir
+            model_file = '%s/train/%s' % (it_dir, options.weight_file)
           else:
             out_dir = '%s/eval%d_spec' % (it_dir, di)
             model_file = '%s/train/model%d_best.h5' % (it_dir, di)
@@ -361,16 +389,20 @@ def main():
               cmd += ' --shifts %s' % options.shifts
             cmd += ' %s' % params_file
             cmd += ' %s' % model_file
-            cmd += ' %s/data%d' % (it_dir, di)
+            if options.train_f3:
+              cmd += ' %s/f3c0/data%d' % (options.out_dir, di)
+            else:
+              cmd += ' %s/data%d' % (it_dir, di)
 
             name = '%s-spec-f%dc%d' % (options.name, fi, ci)
             job = slurm.Job(cmd,
                             name=name,
                             out_file='%s.out'%out_dir,
                             err_file='%s.err'%out_dir,
+                            sb_file='%s.sb'%out_dir,
                             queue=options.queue,
                             cpu=num_cpu, gpu=num_gpu,
-                            mem=150000,
+                            mem=60000,
                             time='%d:00:00' % (5*time_base))
             jobs.append(job)
         
@@ -496,7 +528,10 @@ def options_string(options, train_options, rep_dir):
     elif opt.dest == 'restore':
       fold_dir_mid = rep_dir.split('/')[-1]
       if options.trunk:
-        opt_value = '%s/%s/train/model_trunk.h5' % (opt_value, fold_dir_mid)
+        if options.transfer:
+          opt_value = '%s/%s.h5' % (opt_value, fold_dir_mid)
+        else:
+          opt_value = '%s/%s/train/model_trunk.h5' % (opt_value, fold_dir_mid)
       else:
         opt_value = '%s/%s/train/model_best.h5' % (opt_value, fold_dir_mid)
 

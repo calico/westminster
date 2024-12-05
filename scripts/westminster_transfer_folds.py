@@ -62,25 +62,6 @@ def main():
       default=False, action='store_true',
       help='Restore only model trunk [Default: %default]')
 
-  # transfer options
-  train_options.add_option('--transfer_mode', dest='transfer',
-      default='other', help='transfer method to apply.[full, linear, other]')
-  
-  train_options.add_option('--att_adapter', dest='att_adapter',
-      default=None, type="string", 
-                           help='attention adapter. [adapterHoulsby, lora, lora_full, ia3, locon, houlsby_se, lora_conv]')
-  train_options.add_option('--att_latent', dest='att_latent',
-      default=None, type='int', help='latent size for attention adapter')
-  train_options.add_option('--lora_alpha', dest='lora_alpha',
-      default=None, type='int', help='lora alpha')
-  
-  train_options.add_option('--conv_select', dest='conv_select',
-      default=None, type="int", help='# of conv layers to insert locon.')
-  train_options.add_option('--conv_rank', dest='locon_rank',
-      default=None, type='int', help='locon/se conv rank.')
-  train_options.add_option('--locon_alpha', dest='locon_alpha',
-      default=None, type='int', help='locon alpha.')
-  
   parser.add_option_group(train_options)  
   
 

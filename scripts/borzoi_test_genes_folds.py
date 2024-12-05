@@ -56,6 +56,13 @@ def main():
         help="Ensemble prediction shifts [Default: %default]",
     )
     parser.add_option(
+        "--f16",
+        dest="f16",        
+        default=False,
+        action="store_true",
+        help="use mixed precision for inference",
+    )
+    parser.add_option(
         "--span",
         dest="span",
         default=False,
@@ -182,6 +189,18 @@ def main():
         action="store_true",
         help="Update metric status; do not run jobs [Default: %default]",
     )
+    parser.add_option(
+        '--train_f3', 
+        dest='train_f3',
+        default=False, 
+        action='store_true'
+    )
+    parser.add_option(
+        '--reduce_mean', 
+        dest='reduce_mean',
+        default=False, 
+        action='store_true'
+    )
 
     (options, args) = parser.parse_args()
 
@@ -250,6 +269,10 @@ def main():
                     cmd += " --rc"
                 if options.shifts:
                     cmd += " --shifts %s" % options.shifts
+                if options.f16:
+                    cmd += " --f16"
+                if options.reduce_mean:
+                    cmd += " --reduce_mean"
                 if options.span:
                     cmd += " --span"
                     job_mem = 240000
@@ -259,7 +282,12 @@ def main():
                     cmd += " -t %s" % options.targets_file
                 cmd += " %s" % params_file
                 cmd += " %s" % model_file
-                cmd += " %s/data%d" % (it_dir, head_i)
+                
+                if options.train_f3:
+                    cmd += ' %s/f3c0/data%d' % (options.exp_dir, head_i)
+                else:
+                    cmd += " %s/data%d" % (it_dir, head_i)
+
                 cmd += " %s" % options.genes_gtf
 
                 name = "%s-testg-f%dc%d" % (options.name, fi, ci)

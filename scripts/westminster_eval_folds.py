@@ -54,6 +54,9 @@ def main():
   eval_options.add_option('--rc', dest='rc',
       default=False, action='store_true',
       help='Average forward and reverse complement predictions [Default: %default]')
+  eval_options.add_option('--json', dest='json',
+      default=None,
+      help='params json file.')
   eval_options.add_option('--shifts', dest='shifts',
       default='0', type='str',
       help='Ensemble prediction shifts [Default: %default]')
@@ -94,6 +97,8 @@ def main():
   rep_options.add_option('--spec_mem', dest='spec_mem',
       default=150000, type='int',
       help='memory requirement for spec jobs [Default: %default]')
+  rep_options.add_option('--train_f3', dest='train_f3',
+      default=False, action='store_true')
   parser.add_option_group(rep_options)
 
   (options, args) = parser.parse_args()
@@ -133,7 +138,11 @@ def main():
           out_dir = '%s/eval%d' % (it_dir, di)
           model_file = '%s/train/model%d_best.h5' % (it_dir, di)
 
-        params_file = '%s/train/params.json' % it_dir
+        if options.json is None:
+          params_file = '%s/train/params.json' % it_dir
+        else:
+          params_file = options.json
+        
         # check if done
         acc_file = '%s/acc.txt' % out_dir
         if os.path.isfile(acc_file):
@@ -142,7 +151,7 @@ def main():
           cmd = cmd_source
           cmd += ' conda activate %s;' % options.conda_env
           cmd += ' echo $HOSTNAME;'
-          cmd += ' hound_eval.py'
+          cmd += ' hound_eval.py --f16'
           cmd += ' --head %d' % di
           cmd += ' -o %s' % out_dir
           if options.rc:
@@ -154,7 +163,11 @@ def main():
             cmd += ' --step %d' % options.step
           cmd += ' %s' % params_file
           cmd += ' %s' % model_file
-          cmd += ' %s/data%d' % (it_dir, di)
+          
+          if options.train_f3:
+            cmd += ' %s/f3c0/data%d' % (options.out_dir, di)
+          else:
+            cmd += ' %s/data%d' % (it_dir, di)
 
           name = '%s-eval-f%dc%d' % (options.name, fi, ci)
           job = slurm.Job(cmd,
@@ -208,8 +221,12 @@ def main():
             cmd += ' --shifts %s' % options.shifts
           cmd += ' %s' % params_file
           cmd += ' %s' % model_file
-          cmd += ' %s/data%d' % (it_dir, di)
-
+          
+          if options.train_f3:
+            cmd += ' %s/f3c0/data%d' % (options.out_dir, di)
+          else:
+            cmd += ' %s/data%d' % (it_dir, di)
+          
           name = '%s-spec-f%dc%d' % (options.name, fi, ci)
           job = slurm.Job(cmd,
                           name=name,
