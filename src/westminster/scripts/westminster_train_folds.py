@@ -162,6 +162,18 @@ def main():
         action="store_true",
         help="Force all crosses to use the same validation fold [Default: %default]",
     )
+    rep_options.add_option(
+        '--mem', 
+        dest='memory',
+        default=30000,
+        help='SLURM memory on which to run the jobs [Default: %default]')
+    rep_options.add_option(
+        '--transfer', 
+        dest='transfer',
+        default=False, 
+        action='store_true',
+        help="Enable transfer learning instead of training from scratch. Requires --trunk pointing to the model_trunk.h5",
+    )
     parser.add_option_group(rep_options)
 
     (options, args) = parser.parse_args()
@@ -235,7 +247,12 @@ def main():
     # train
 
     jobs = []
-
+    
+    if options.transfer:
+        train_cmd = 'hound_transfer.py'
+    else:
+        train_cmd = 'hound_train.py'
+    
     for ci in range(options.crosses):
         for fi in fold_index:
             rep_dir = "%s/f%dc%d" % (options.out_dir, fi, ci)
@@ -255,14 +272,14 @@ def main():
                 cmd += "conda activate %s;" % options.conda_env
                 cmd += " echo $HOSTNAME;"
 
-                cmd += " hound_train.py"
+                cmd += " %s" % train_cmd
                 cmd += " %s" % options_string(options, train_options, rep_dir)
                 cmd += " %s %s" % (params_file, " ".join(rep_data_dirs))
 
                 name = "%s-train-f%dc%d" % (options.name, fi, ci)
                 sbf = os.path.abspath("%s/train.sb" % rep_dir)
-                outf = os.path.abspath("%s/train.out" % rep_dir)
-                errf = os.path.abspath("%s/train.err" % rep_dir)
+                outf = os.path.abspath("%s/train.%%j.out" % rep_dir)
+                errf = os.path.abspath("%s/train.%%j.err" % rep_dir)
 
                 j = slurm.Job(
                     cmd,
@@ -273,7 +290,7 @@ def main():
                     queue=options.queue,
                     cpu=4,
                     gpu=params_train.get("num_gpu", 1),
-                    mem=30000,
+                    mem=options.memory,
                     time="60-0:0:0",
                 )
                 jobs.append(j)
