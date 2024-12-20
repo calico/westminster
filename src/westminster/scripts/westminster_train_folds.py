@@ -278,8 +278,8 @@ def main():
 
                 name = "%s-train-f%dc%d" % (options.name, fi, ci)
                 sbf = os.path.abspath("%s/train.sb" % rep_dir)
-                outf = os.path.abspath("%s/train.%%j.out" % rep_dir)
-                errf = os.path.abspath("%s/train.%%j.err" % rep_dir)
+                outf = os.path.abspath("%s/train.out" % rep_dir)
+                errf = os.path.abspath("%s/train.err" % rep_dir)
 
                 j = slurm.Job(
                     cmd,
