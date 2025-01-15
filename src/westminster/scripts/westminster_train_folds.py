@@ -73,18 +73,6 @@ def main():
         action="store_true",
         help="Restore only model trunk [Default: %default]",
     )
-    train_options.add_option(
-        "--tfr_train",
-        dest="tfr_train_pattern",
-        default=None,
-        help="Training TFR pattern string appended to data_dir/tfrecords for subsetting [Default: %default]",
-    )
-    train_options.add_option(
-        "--tfr_eval",
-        dest="tfr_eval_pattern",
-        default=None,
-        help="Evaluation TFR pattern string appended to data_dir/tfrecords for subsetting [Default: %default]",
-    )
     parser.add_option_group(train_options)
 
     # multi
@@ -142,11 +130,7 @@ def main():
         help="SLURM queue on which to run the jobs [Default: %default]",
     )
     rep_options.add_option(
-        "-r",
-        "--restart",
-        dest="restart",
-        default=False,
-        action="store_true"
+        "-r", "--restart", dest="restart", default=False, action="store_true"
     )
     rep_options.add_option(
         "--setup",
@@ -176,7 +160,7 @@ def main():
     # prep work
 
     if not options.restart and os.path.isdir(options.out_dir):
-        print("Output directory %s exists. Please remove." % options.out_dir)
+        print(f"Output directory {options.out_dir} exists. Please remove.")
         exit(1)
     os.makedirs(options.out_dir, exist_ok=True)
 
@@ -186,11 +170,11 @@ def main():
     params_train = params["train"]
 
     # copy params into output directory
-    shutil.copy(params_file, "%s/params.json" % options.out_dir)
+    shutil.copy(params_file, f"{options.out_dir}/params.json")
 
     # read data parameters
     num_data = len(data_dirs)
-    data_stats_file = "%s/statistics.json" % data_dirs[0]
+    data_stats_file = f"{data_dirs[0]}/statistics.json"
     with open(data_stats_file) as data_stats_open:
         data_stats = json.load(data_stats_open)
 
@@ -200,33 +184,26 @@ def main():
     # subset folds
     if options.fold_subset is not None:
         num_folds = min(options.fold_subset, num_folds)
-  
+
     fold_index = [fold_i for fold_i in range(num_folds)]
 
     # subset folds (list)
     if options.fold_subset_list is not None:
         fold_index = [int(fold_str) for fold_str in options.fold_subset_list.split(",")]
 
-    if options.queue == "standard":
-        num_cpu = 8
-        num_gpu = 0
-        time_base = 64
-    else:
-        num_cpu = 2
-        num_gpu = 1
-        time_base = 24
-
     # arrange data
     for ci in range(options.crosses):
         for fi in fold_index:
-            rep_dir = "%s/f%dc%d" % (options.out_dir, fi, ci)
+            rep_dir = f"{options.out_dir}/f{fi}c{ci}"
             os.makedirs(rep_dir, exist_ok=True)
 
             # make data directories
             for di in range(num_data):
-                rep_data_dir = "%s/data%d" % (rep_dir, di)
+                rep_data_dir = f"{rep_dir}/data{di}"
                 if not os.path.isdir(rep_data_dir):
-                    make_rep_data(data_dirs[di], rep_data_dir, fi, ci, options.identical_crosses)
+                    make_rep_data(
+                        data_dirs[di], rep_data_dir, fi, ci, options.identical_crosses
+                    )
 
     if options.setup:
         exit(0)
@@ -238,20 +215,22 @@ def main():
 
     for ci in range(options.crosses):
         for fi in fold_index:
-            rep_dir = "%s/f%dc%d" % (options.out_dir, fi, ci)
+            rep_dir = f"{options.out_dir}/f{fi}c{ci}"
 
-            train_dir = "%s/train" % rep_dir
+            train_dir = f"{rep_dir}/train"
             if options.restart and not options.checkpoint and os.path.isdir(train_dir):
-                print("%s found and skipped." % rep_dir)
+                print(f"{rep_dir} found and skipped.")
 
             else:
                 # collect data directories
-                rep_data_dirs = []
-                for di in range(num_data):
-                    rep_data_dirs.append("%s/data%d" % (rep_dir, di))
+                rep_data_dirs = [f"{rep_dir}/data{di}" for di in range(num_data)]
 
                 # train command
-                cmd = ('. %s; ' % os.environ['BASKERVILLE_CONDA']) if 'BASKERVILLE_CONDA' in os.environ else ''
+                cmd = (
+                    (". %s; " % os.environ["BASKERVILLE_CONDA"])
+                    if "BASKERVILLE_CONDA" in os.environ
+                    else ""
+                )
                 cmd += "conda activate %s;" % options.conda_env
                 cmd += " echo $HOSTNAME;"
 
@@ -259,10 +238,10 @@ def main():
                 cmd += " %s" % options_string(options, train_options, rep_dir)
                 cmd += " %s %s" % (params_file, " ".join(rep_data_dirs))
 
-                name = "%s-train-f%dc%d" % (options.name, fi, ci)
-                sbf = os.path.abspath("%s/train.sb" % rep_dir)
-                outf = os.path.abspath("%s/train.out" % rep_dir)
-                errf = os.path.abspath("%s/train.err" % rep_dir)
+                name = f"{options.name}-train-f{fi}c{ci}"
+                sbf = os.path.abspath(f"{rep_dir}/train.sb")
+                outf = os.path.abspath(f"{rep_dir}/train.out")
+                errf = os.path.abspath(f"{rep_dir}/train.err")
 
                 j = slurm.Job(
                     cmd,
@@ -271,7 +250,7 @@ def main():
                     errf,
                     sbf,
                     queue=options.queue,
-                    cpu=4,
+                    cpu=8,
                     gpu=params_train.get("num_gpu", 1),
                     mem=30000,
                     time="60-0:0:0",
@@ -285,17 +264,19 @@ def main():
 
 def make_rep_data(data_dir, rep_data_dir, fi, ci, identical_crosses):
     # read data parameters
-    data_stats_file = "%s/statistics.json" % data_dir
+    data_stats_file = f"{data_dir}/statistics.json"
     with open(data_stats_file) as data_stats_open:
         data_stats = json.load(data_stats_open)
 
     # sequences per fold
     fold_seqs = []
     dfi = 0
-    while "fold%d_seqs" % dfi in data_stats:
-        fold_seqs.append(data_stats["fold%d_seqs" % dfi])
-        del data_stats["fold%d_seqs" % dfi]
+    fold_label = f"fold{dfi}_seqs"
+    while fold_label in data_stats:
+        fold_seqs.append(data_stats[fold_label])
+        del data_stats[fold_label]
         dfi += 1
+        fold_label = f"fold{dfi}_seqs"
     num_folds = dfi
 
     # split folds into train/valid/test
@@ -318,67 +299,46 @@ def make_rep_data(data_dir, rep_data_dir, fi, ci, identical_crosses):
     data_stats["test_seqs"] = fold_seqs[test_fold]
     data_stats["valid_seqs"] = fold_seqs[valid_fold]
     data_stats["train_seqs"] = sum([fold_seqs[tf] for tf in train_folds])
-    with open("%s/statistics.json" % rep_data_dir, "w") as data_stats_open:
+    with open(f"{rep_data_dir}/statistics.json", "w") as data_stats_open:
         json.dump(data_stats, data_stats_open, indent=4)
 
     # set sequence tvt
-    try:
-        seqs_bed_out = open("%s/sequences.bed" % rep_data_dir, "w")
-        for line in open("%s/sequences.bed" % data_dir):
-            a = line.split()
-            sfi = int(a[-1].replace("fold", ""))
-            if sfi == test_fold:
-                a[-1] = "test"
-            elif sfi == valid_fold:
-                a[-1] = "valid"
-            else:
-                a[-1] = "train"
-            print("\t".join(a), file=seqs_bed_out)
-        seqs_bed_out.close()
-    except (ValueError, FileNotFoundError):
-        pass
+    seqs_bed_out = open(f"{rep_data_dir}/sequences.bed", "w")
+    for line in open(f"{data_dir}/sequences.bed"):
+        a = line.split()
+        sfi = int(a[-1].replace("fold", ""))
+        if sfi == test_fold:
+            a[-1] = "test"
+        elif sfi == valid_fold:
+            a[-1] = "valid"
+        else:
+            a[-1] = "train"
+        print("\t".join(a), file=seqs_bed_out)
+    seqs_bed_out.close()
 
     # copy targets
-    shutil.copy("%s/targets.txt" % data_dir, "%s/targets.txt" % rep_data_dir)
+    shutil.copy(f"{data_dir}/targets.txt", f"{rep_data_dir}/targets.txt")
 
     # sym link tfrecords
-    rep_tfr_dir = "%s/tfrecords" % rep_data_dir
-    os.mkdir(rep_tfr_dir)
+    data_examples_dir = f"{data_dir}/examples"
+    rep_examples_dir = f"{rep_data_dir}/examples"
+    os.mkdir(rep_examples_dir)
 
-    # test tfrecords
-    ti = 0
-    test_tfrs = natsorted(
-        glob.glob("%s/tfrecords/fold%d-*.tfr" % (data_dir, test_fold))
-    )
-    for test_tfr in test_tfrs:
-        test_tfr = os.path.abspath(test_tfr)
-        test_rep_tfr = "%s/test-%d.tfr" % (rep_tfr_dir, ti)
-        os.symlink(test_tfr, test_rep_tfr)
-        ti += 1
+    # test examples
+    data_test_dir = f"{data_examples_dir}/fold{test_fold}"
+    rep_test_dir = f"{rep_examples_dir}/test"
+    os.symlink(data_test_dir, rep_test_dir)
 
-    # valid tfrecords
-    ti = 0
-    valid_tfrs = natsorted(
-        glob.glob("%s/tfrecords/fold%d-*.tfr" % (data_dir, valid_fold))
-    )
-    for valid_tfr in valid_tfrs:
-        valid_tfr = os.path.abspath(valid_tfr)
-        valid_rep_tfr = "%s/valid-%d.tfr" % (rep_tfr_dir, ti)
-        os.symlink(valid_tfr, valid_rep_tfr)
-        ti += 1
+    # valid examples
+    data_valid_dir = f"{data_examples_dir}/fold{valid_fold}"
+    rep_valid_dir = f"{rep_examples_dir}/valid"
+    os.symlink(data_valid_dir, rep_valid_dir)
 
-    # train tfrecords
-    ti = 0
-    train_tfrs = []
+    # train examples
     for tfi in train_folds:
-        train_tfrs += natsorted(
-            glob.glob("%s/tfrecords/fold%d-*.tfr" % (data_dir, tfi))
-        )
-    for train_tfr in train_tfrs:
-        train_tfr = os.path.abspath(train_tfr)
-        train_rep_tfr = "%s/train-%d.tfr" % (rep_tfr_dir, ti)
-        os.symlink(train_tfr, train_rep_tfr)
-        ti += 1
+        data_train_dir = f"{data_examples_dir}/fold{tfi}"
+        rep_train_dir = f"{rep_examples_dir}/train{tfi}"
+        os.symlink(data_train_dir, rep_train_dir)
 
 
 def options_string(options, train_options, rep_dir):
