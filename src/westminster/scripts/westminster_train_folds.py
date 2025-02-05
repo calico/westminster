@@ -325,19 +325,19 @@ def make_rep_data(data_dir, rep_data_dir, fi, ci, identical_crosses):
     os.mkdir(rep_examples_dir)
 
     # test examples
-    data_test_dir = f"{data_examples_dir}/fold{test_fold}"
-    rep_test_dir = f"{rep_examples_dir}/test"
+    data_test_dir = f"{data_examples_dir}/fold{test_fold}.zarr"
+    rep_test_dir = f"{rep_examples_dir}/test.zarr"
     os.symlink(data_test_dir, rep_test_dir)
 
     # valid examples
-    data_valid_dir = f"{data_examples_dir}/fold{valid_fold}"
-    rep_valid_dir = f"{rep_examples_dir}/valid"
+    data_valid_dir = f"{data_examples_dir}/fold{valid_fold}.zarr"
+    rep_valid_dir = f"{rep_examples_dir}/valid.zarr"
     os.symlink(data_valid_dir, rep_valid_dir)
 
     # train examples
     for tfi in train_folds:
-        data_train_dir = f"{data_examples_dir}/fold{tfi}"
-        rep_train_dir = f"{rep_examples_dir}/train{tfi}"
+        data_train_dir = f"{data_examples_dir}/fold{tfi}.zarr"
+        rep_train_dir = f"{rep_examples_dir}/train{tfi}.zarr"
         os.symlink(data_train_dir, rep_train_dir)
 
 
