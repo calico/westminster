@@ -202,7 +202,7 @@ def main():
         print("Found %d folds" % options.num_folds)
         if options.num_folds == 0:
             exit(1)
-    
+
     # subset folds
     fold_index = [fold_i for fold_i in range(options.num_folds)]
 
@@ -224,7 +224,11 @@ def main():
     # SED
 
     # SED command base
-    cmd_base = ('. %s; ' % os.environ['BASKERVILLE_CONDA']) if 'BASKERVILLE_CONDA' in os.environ else ''
+    cmd_base = (
+        (". %s; " % os.environ["BASKERVILLE_CONDA"])
+        if "BASKERVILLE_CONDA" in os.environ
+        else ""
+    )
     cmd_base += "conda activate %s;" % options.conda_env
     cmd_base += " echo $HOSTNAME;"
 

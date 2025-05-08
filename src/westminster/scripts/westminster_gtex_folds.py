@@ -239,7 +239,7 @@ def main():
         print("Found %d folds" % options.num_folds)
         if options.num_folds == 0:
             exit(1)
-    
+
     # subset folds
     fold_index = [fold_i for fold_i in range(options.num_folds)]
 
@@ -261,7 +261,11 @@ def main():
     # SAD
 
     # SAD command base
-    cmd_base = ('. %s; ' % os.environ['BASKERVILLE_CONDA']) if 'BASKERVILLE_CONDA' in os.environ else ''
+    cmd_base = (
+        (". %s; " % os.environ["BASKERVILLE_CONDA"])
+        if "BASKERVILLE_CONDA" in os.environ
+        else ""
+    )
     cmd_base += "conda activate %s;" % options.conda_env
     cmd_base += " echo $HOSTNAME;"
 
@@ -361,16 +365,16 @@ def main():
 
     #######################################################
     # verify
-    
+
     for ci in range(options.crosses):
         for fi in fold_index:
             it_out_dir = f"{exp_dir}/f{fi}c{ci}/{gtex_out_dir}"
-  
+
             for pi in range(options.processes):
                 neg_scores_file = f"{it_out_dir}/merge_neg/job{pi}/scores.h5"
                 if not nonzero_h5(neg_scores_file, snp_stats):
                     raise RuntimeError(f"SNP scoring job failed: {neg_scores_file}")
-                
+
                 pos_scores_file = f"{it_out_dir}/merge_pos/job{pi}/scores.h5"
                 if not nonzero_h5(pos_scores_file, snp_stats):
                     raise RuntimeError(f"SNP scoring job failed: {pos_scores_file}")
@@ -391,7 +395,7 @@ def main():
             pos_out_dir = "%s/merge_pos" % it_out_dir
             if not os.path.isfile("%s/scores.h5" % pos_out_dir):
                 collect_scores(pos_out_dir, options.processes)
-    
+
     ################################################################
     # split study/tissue variants
 
@@ -452,7 +456,7 @@ def main():
     ################################################################
     # fit classifiers
 
-    # SNPs (random forest) 
+    # SNPs (random forest)
     # cmd_base = "westminster_classify.py -f 8 -i 20 -n 512 -s"
     # SNPs (xgboost)
     cmd_base = "westminster_classify.py -f 8 -i 20 -n 96 -s -x"
@@ -572,7 +576,7 @@ def main():
         cmd_coef += f" -o {coef_out_dir}"
         cmd_coef += f" -s {snp_stat}"
         cmd_coef += f" {it_out_dir}"
-        
+
         if options.local:
             jobs.append(cmd_coef)
         else:

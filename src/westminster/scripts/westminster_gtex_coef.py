@@ -316,7 +316,7 @@ def read_scores(
         )
         variant_scores = np.arcsinh(variant_scores)
 
-    if score_key in ["SUM","logSUM"]:
+    if score_key in ["SUM", "logSUM"]:
         # flip signs
         sad_flip = score_ref != eqtl_df.allele
         variant_scores[sad_flip] = -variant_scores[sad_flip]
