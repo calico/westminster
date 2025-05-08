@@ -57,13 +57,6 @@ def main():
         help="Genome FASTA for sequences [Default: %default]",
     )
     snp_options.add_option(
-        "--float16",
-        dest="float16",
-        default=False,
-        action="store_true",
-        help="Use mixed float16 precision [Default: %default]",
-    )
-    snp_options.add_option(
         "--indel_stitch",
         dest="indel_stitch",
         default=False,
@@ -102,13 +95,6 @@ def main():
         default=None,
         type="str",
         help="File specifying target indexes and labels in table format",
-    )
-    snp_options.add_option(
-        "-u",
-        dest="untransform_old",
-        default=False,
-        action="store_true",
-        help="Untransform old models [Default: %default]",
     )
     parser.add_option_group(snp_options)
 
@@ -154,7 +140,7 @@ def main():
     fold_options.add_option(
         "-e",
         dest="conda_env",
-        default="tf12",
+        default="torch2.5",
         help="Anaconda environment [Default: %default]",
     )
     fold_options.add_option(
@@ -227,15 +213,11 @@ def main():
     if options.num_folds is None:
         options.num_folds = 0
         fold0_dir = "%s/f%dc0" % (exp_dir, options.num_folds)
-        model_file = "%s/train/model_best.h5" % fold0_dir
-        if options.data_head is not None:
-            model_file = "%s/train/model%d_best.h5" % (fold0_dir, options.data_head)
+        model_file = "%s/train/model_best.pth" % fold0_dir
         while os.path.isfile(model_file):
             options.num_folds += 1
             fold0_dir = "%s/f%dc0" % (exp_dir, options.num_folds)
-            model_file = "%s/train/model_best.h5" % fold0_dir
-            if options.data_head is not None:
-                model_file = "%s/train/model%d_best.h5" % (fold0_dir, options.data_head)
+            model_file = "%s/train/model_best.pth" % fold0_dir
         print("Found %d folds" % options.num_folds)
         if options.num_folds == 0:
             exit(1)
@@ -277,9 +259,7 @@ def main():
             os.makedirs(it_out_dir, exist_ok=True)
 
             # choose model
-            model_file = "%s/train/model_best.h5" % it_dir
-            if options.data_head is not None:
-                model_file = "%s/train/model%d_best.h5" % (it_dir, options.data_head)
+            model_file = "%s/train/model_best.pth" % it_dir
 
             ########################################
             # negative jobs
