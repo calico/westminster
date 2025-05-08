@@ -58,6 +58,12 @@ def main():
         help="Average forward and reverse complement predictions [Default: %default]",
     )
     eval_options.add_option(
+        "--save",
+        default=False,
+        action="store_true",
+        help="Save targets and predictions numpy arrays [Default: %default]",
+    )
+    eval_options.add_option(
         "--shifts",
         dest="shifts",
         default="0",
@@ -70,6 +76,20 @@ def main():
         default=1,
         type="int",
         help="Spatial step for specificity/spearmanr [Default: %default]",
+    )
+    parser.add_option(
+        "--test",
+        dest="test_only",
+        default=False,
+        action="store_true",
+        help="Evaluate only the test set [Default: %default]",
+    )
+    parser.add_option(
+        "--valid",
+        dest="valid_only",
+        default=False,
+        action="store_true",
+        help="Evaluate only the validation set [Default: %default]",
     )
     parser.add_option_group(eval_options)
 
@@ -145,20 +165,21 @@ def main():
 
     # read data parameters
     num_data = len(data_dirs)
-    data_stats_file = "%s/statistics.json" % data_dirs[0]
+    data_stats_file = f"{data_dirs[0]}/statistics.json"
     with open(data_stats_file) as data_stats_open:
         data_stats = json.load(data_stats_open)
 
     # count folds
     num_folds = len([dkey for dkey in data_stats if dkey.startswith("fold")])
 
-    # focus on initial folds
-    if options.fold_subset is not None:
-        num_folds = min(options.fold_subset, num_folds)
-
-    # select specific folds
+    # select specific folds to evaluate
     if options.fold_subset_list is None:
-        fold_index = [fold_i for fold_i in range(num_folds)]
+        # focus on initial folds
+        if options.fold_subset is None:
+            num_folds_score = num_folds
+        else:
+            num_folds_score = min(options.fold_subset, num_folds)
+        fold_index = [fold_i for fold_i in range(num_folds_score)]
     else:
         fold_index = [int(fold_str) for fold_str in options.fold_subset_list.split(",")]
 
@@ -181,28 +202,32 @@ def main():
             it_dir = "%s/f%dc%d" % (options.out_dir, fi, ci)
 
             for di in range(num_data):
-                if num_data == 1:
-                    eval_dir = f"{it_dir}/eval"
-                    model_file = f"{it_dir}/train/model_best.h5"
-                else:
-                    eval_dir = f"{it_dir}/eval{di}"
-                    model_file = f"{it_dir}/train/model{di}_best.h5"
-
+                model_file = get_model_file(it_dir, di)
                 if os.path.isfile(model_file):
+                    if num_data == 1:
+                        eval_dir = f"{it_dir}/eval"
+                    else:
+                        eval_dir = f"{it_dir}/eval{di}"
+
                     os.makedirs(eval_dir, exist_ok=True)
 
                     for ei in range(num_folds):
                         eval_fold_dir = f"{eval_dir}/fold{ei}"
 
+                        if options.test_only and ei != fi:
+                            continue
+                        if options.valid_only and ei != fi+1:
+                            continue
+
                         # symlink test metrics
-                        if fi == ei and not os.path.isfile(f"{eval_dir}/test.out"):
+                        if fi == ei and not os.path.islink(f"{eval_dir}/test.out"):
                             os.symlink(f"fold{ei}", f"{eval_dir}/test")
                             os.symlink(f"fold{ei}.out", f"{eval_dir}/test.out")
 
                         # check if done
                         acc_file = f"{eval_fold_dir}/acc.txt"
                         if os.path.isfile(acc_file):
-                            print("%s already generated." % acc_file)
+                            print(f"{acc_file} already generated.")
                         else:
                             # hound evaluate
                             cmd = (
@@ -213,18 +238,29 @@ def main():
                             cmd += "conda activate %s;" % options.conda_env
                             cmd += " echo $HOSTNAME;"
                             cmd += " hound_eval.py"
-                            cmd += " --head %d" % di
-                            cmd += " -o %s" % eval_fold_dir
+                            cmd += f" --head {di}"
+                            cmd += f" -o {eval_fold_dir}"
+                            if options.rank_corr:
+                                cmd += " --rank"
                             if options.rc:
                                 cmd += " --rc"
+                            if options.save:
+                                cmd += " --save"
                             if options.shifts:
-                                cmd += " --shifts %s" % options.shifts
-                            cmd += " --split fold%d" % ei
-                            cmd += " %s" % params_file
-                            cmd += " %s" % model_file
-                            cmd += " %s" % data_dirs[di]
+                                cmd += f" --shifts {options.shifts}"
+                            cmd += f" --split fold{ei}"
+                            if options.rank_corr or options.save:
+                                cmd += f" --step {options.step}"
+                            cmd += f" {params_file}"
+                            cmd += f" {model_file}"
+                            cmd += f" {data_dirs[di]}"
 
-                            name = "%s-eval-f%de%d" % (options.name, fi, ei)
+                            if options.save:
+                                job_mem = 60000
+                            else:
+                                job_mem = 30000
+
+                            name = f"{options.name}-eval-f{fi}e{ei}"
                             job = slurm.Job(
                                 cmd,
                                 name=name,
@@ -233,7 +269,7 @@ def main():
                                 queue=options.queue,
                                 cpu=num_cpu,
                                 gpu=num_gpu,
-                                mem=30000,
+                                mem=job_mem,
                                 time="%d:00:00" % time_base,
                             )
                             jobs.append(job)
@@ -247,18 +283,17 @@ def main():
                 it_dir = "%s/f%dc%d" % (options.out_dir, fi, ci)
 
                 for di in range(num_data):
-                    if num_data == 1:
-                        out_dir = "%s/spec" % it_dir
-                        model_file = "%s/train/model_best.h5" % it_dir
-                    else:
-                        out_dir = "%s/spec%d" % (it_dir, di)
-                        model_file = "%s/train/model%d_best.h5" % (it_dir, di)
-
+                    model_file = get_model_file(it_dir, di)
                     if os.path.isfile(model_file):
+                        if num_data == 1:
+                            out_dir = f"{it_dir}/spec"
+                        else:
+                            out_dir = f"{it_dir}/spec{di}"
+
                         # check if done
                         acc_file = "%s/acc.txt" % out_dir
                         if os.path.isfile(acc_file):
-                            print("%s already generated." % acc_file)
+                            print(f"{acc_file} already generated.")
                         else:
                             cmd = (
                                 (". %s; " % os.environ["BASKERVILLE_CONDA"])
@@ -283,12 +318,12 @@ def main():
                             job = slurm.Job(
                                 cmd,
                                 name=name,
-                                out_file="%s.out" % out_dir,
-                                err_file="%s.err" % out_dir,
+                                out_file=f"{out_dir}.out",
+                                err_file=f"{out_dir}.err",
                                 queue=options.queue,
                                 cpu=num_cpu,
                                 gpu=num_gpu,
-                                mem=90000,
+                                mem=120000,
                                 time="%d:00:00" % (3 * time_base),
                             )
                             jobs.append(job)
@@ -296,6 +331,22 @@ def main():
     slurm.multi_run(
         jobs, max_proc=options.processes, verbose=True, launch_sleep=10, update_sleep=60
     )
+
+
+def get_model_file(it_dir, di):
+    """Find model file in it_dir, robust to pytorch or tensorflow."""
+    # pytorch
+    model_file = f"{it_dir}/train/model_best.pth"
+    if not os.path.isfile(model_file):
+        # single data tensorflow
+        model_file = f"{it_dir}/train/model_best.h5"
+        if not os.path.isfile(model_file):
+            # multi data tensorflow
+            model_file = f"{it_dir}/train/model{di}_best.h5"
+            if not os.path.isfile(model_file):
+                model_file = ""
+                print(f"No model in {it_dir}")                
+    return model_file
 
 
 ################################################################################
