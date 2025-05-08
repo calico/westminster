@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
 import os
+import pdb
 import re
 import sys
 
@@ -91,6 +92,7 @@ def main():
     # 'Cells_Cultured_fibroblasts': 'fibroblast',
 
     metrics_tissue = []
+    metrics_variants = []
     metrics_sauroc = []
     metrics_cauroc = []
     metrics_r = []
@@ -111,18 +113,23 @@ def main():
                     args.snp_stat,
                     verbose=args.verbose,
                 )
-                variant_scores = variant_scores[eqtl_df.consistent]
             except TypeError:
                 print(f"Tracks matching {tissue} are missing", file=sys.stderr)
                 continue
 
+            # use to isolate insertions/deletions
+            # deletion_mask = np.array(eqtl_df["class"] == "insertion")
+            # eqtl_df = eqtl_df[deletion_mask]
+            # variant_scores = variant_scores[deletion_mask]
+
             # compute sign AUROCs
             variant_sign = eqtl_df[eqtl_df.consistent].sign
-            sign_auroc = roc_auc_score(variant_sign, variant_scores)
+            cvariant_scores = variant_scores[eqtl_df.consistent]
+            sign_auroc = roc_auc_score(variant_sign, cvariant_scores)
 
             # compute SpearmanR
             variant_coef = eqtl_df[eqtl_df.consistent].coef
-            coef_r = spearmanr(variant_coef, variant_scores)[0]
+            coef_r = spearmanr(variant_coef, cvariant_scores)[0]
 
             # classification AUROC
             class_auroc = classify_auroc(
@@ -149,6 +156,7 @@ def main():
 
             # save
             metrics_tissue.append(tissue)
+            metrics_variants.append(eqtl_df.shape[0])
             metrics_sauroc.append(sign_auroc)
             metrics_cauroc.append(class_auroc)
             metrics_r.append(coef_r)
@@ -160,6 +168,7 @@ def main():
     metrics_df = pd.DataFrame(
         {
             "tissue": metrics_tissue,
+            "variants": metrics_variants,
             "auroc_sign": metrics_sauroc,
             "spearmanr": metrics_r,
             "auroc_class": metrics_cauroc,
@@ -202,10 +211,19 @@ def read_eqtl(tissue: str, gtex_vcf_dir: str, pip_t: float = 0.9):
     variant_a1 = {}
     variant_sign = {}
     variant_beta = {}
+    variant_class = {}
     inconsistent_variants = set()
     for variant in df_causal.itertuples():
         vid = variant.variant
         vsign = variant.beta_posterior > 0
+
+        # classify variant type
+        if len(variant.allele1) == len(variant.allele2):
+            variant_class[vid] = "SNP"
+        elif len(variant.allele1) < len(variant.allele2):
+            variant_class[vid] = "insertion"
+        else:
+            variant_class[vid] = "deletion"
 
         variant_a1[vid] = variant.allele1
         variant_beta.setdefault(vid, []).append(variant.beta_posterior)
@@ -243,6 +261,7 @@ def read_eqtl(tissue: str, gtex_vcf_dir: str, pip_t: float = 0.9):
                 "sign": [variant_sign[vid] for vid in pred_variants],
                 "allele": [variant_a1[vid] for vid in pred_variants],
                 "consistent": consistent_mask,
+                "class": [variant_class[vid] for vid in pred_variants],
             }
         )
     return eqtl_df
@@ -297,9 +316,13 @@ def read_scores(
         )
         variant_scores = np.arcsinh(variant_scores)
 
-    # flip signs
-    sad_flip = score_ref != eqtl_df.allele
-    variant_scores[sad_flip] = -variant_scores[sad_flip]
+    if score_key in ["SUM","logSUM"]:
+        # flip signs
+        sad_flip = score_ref != eqtl_df.allele
+        variant_scores[sad_flip] = -variant_scores[sad_flip]
+    else:
+        # unsigned score
+        variant_scores = np.abs(variant_scores)
 
     return variant_scores
 
@@ -325,6 +348,13 @@ def classify_auroc(
     """
     gtex_nscores_file = gtex_scores_file.replace("_pos", "_neg")
     with h5py.File(gtex_nscores_file, "r") as gtex_scores_h5:
+        variant_ref = np.array(
+            [ref.decode("UTF-8") for ref in gtex_scores_h5["ref_allele"]]
+        )
+        variant_alt = np.array(
+            [ref.decode("UTF-8") for ref in gtex_scores_h5["alt_allele"]]
+        )
+
         # determine matching GTEx targets
         target_ids = np.array(
             [ref.decode("UTF-8") for ref in gtex_scores_h5["target_ids"]]
@@ -349,6 +379,11 @@ def classify_auroc(
             axis=-1, dtype="float32"
         )
         neg_scores = np.arcsinh(neg_scores)
+
+    # used to isolate insertions/deletions
+    # num_variants = variant_ref.shape[0]
+    # deletion_mask = [len(variant_alt[vi]) > len(variant_ref[vi]) for vi in range(num_variants)]
+    # neg_scores = neg_scores[deletion_mask]
 
     pos_scores = np.abs(pos_scores)
     neg_scores = np.abs(neg_scores)
