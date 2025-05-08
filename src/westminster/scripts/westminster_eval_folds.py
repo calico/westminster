@@ -77,6 +77,20 @@ def main():
         type="int",
         help="Spatial step for specificity/spearmanr [Default: %default]",
     )
+    parser.add_option(
+        "--test",
+        dest="test_only",
+        default=False,
+        action="store_true",
+        help="Evaluate only the test set [Default: %default]",
+    )
+    parser.add_option(
+        "--valid",
+        dest="valid_only",
+        default=False,
+        action="store_true",
+        help="Evaluate only the validation set [Default: %default]",
+    )
     parser.add_option_group(eval_options)
 
     # multi
@@ -194,13 +208,19 @@ def main():
                         eval_dir = f"{it_dir}/eval"
                     else:
                         eval_dir = f"{it_dir}/eval{di}"
+
                     os.makedirs(eval_dir, exist_ok=True)
 
                     for ei in range(num_folds):
                         eval_fold_dir = f"{eval_dir}/fold{ei}"
 
+                        if options.test_only and ei != fi:
+                            continue
+                        if options.valid_only and ei != fi+1:
+                            continue
+
                         # symlink test metrics
-                        if fi == ei and not os.path.isfile(f"{eval_dir}/test.out"):
+                        if fi == ei and not os.path.islink(f"{eval_dir}/test.out"):
                             os.symlink(f"fold{ei}", f"{eval_dir}/test")
                             os.symlink(f"fold{ei}.out", f"{eval_dir}/test.out")
 
@@ -220,6 +240,8 @@ def main():
                             cmd += " hound_eval.py"
                             cmd += f" --head {di}"
                             cmd += f" -o {eval_fold_dir}"
+                            if options.rank_corr:
+                                cmd += " --rank"
                             if options.rc:
                                 cmd += " --rc"
                             if options.save:
@@ -227,9 +249,16 @@ def main():
                             if options.shifts:
                                 cmd += f" --shifts {options.shifts}"
                             cmd += f" --split fold{ei}"
+                            if options.rank_corr or options.save:
+                                cmd += f" --step {options.step}"
                             cmd += f" {params_file}"
                             cmd += f" {model_file}"
                             cmd += f" {data_dirs[di]}"
+
+                            if options.save:
+                                job_mem = 60000
+                            else:
+                                job_mem = 30000
 
                             name = f"{options.name}-eval-f{fi}e{ei}"
                             job = slurm.Job(
@@ -240,7 +269,7 @@ def main():
                                 queue=options.queue,
                                 cpu=num_cpu,
                                 gpu=num_gpu,
-                                mem=30000,
+                                mem=job_mem,
                                 time="%d:00:00" % time_base,
                             )
                             jobs.append(job)
@@ -294,7 +323,7 @@ def main():
                                 queue=options.queue,
                                 cpu=num_cpu,
                                 gpu=num_gpu,
-                                mem=90000,
+                                mem=120000,
                                 time="%d:00:00" % (3 * time_base),
                             )
                             jobs.append(job)
