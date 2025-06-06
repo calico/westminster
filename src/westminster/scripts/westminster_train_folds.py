@@ -20,8 +20,7 @@ import os
 import pdb
 import shutil
 
-
-import slurm
+import slurmrunner
 
 """
 westminster_train_folds.py
@@ -250,7 +249,7 @@ def main():
                 outf = os.path.abspath(f"{rep_dir}/train.out")
                 errf = os.path.abspath(f"{rep_dir}/train.err")
 
-                j = slurm.Job(
+                j = slurmrunner.Job(
                     cmd,
                     name,
                     outf,
@@ -264,7 +263,7 @@ def main():
                 )
                 jobs.append(j)
 
-    slurm.multi_run(
+    slurmrunner.multi_run(
         jobs, max_proc=options.processes, verbose=True, launch_sleep=10, update_sleep=60
     )
 
@@ -348,7 +347,7 @@ def make_rep_data(data_dir, rep_data_dir, fi, ci, identical_crosses):
         os.symlink(data_train_dir, rep_train_dir)
 
 def make_rep_params(params_file, rep_dir, pretrained_model):
-    """Copy of params file, including pretained model path.
+    """Copy params file, including pretained model path.
     
     Args:
         params_file (str): Path to the original params file.
