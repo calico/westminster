@@ -623,16 +623,17 @@ def read_scores(stats_h5_file: str, score_keys: List[str], target_slice: np.arra
     """
     scores = []
     with h5py.File(stats_h5_file, "r") as stats_h5:
-      for sk in score_keys:
-          score = stats_h5[sk][:]
-          if target_slice is not None:
-            score = score[..., target_slice]
-          score = np.nan_to_num(score).astype("float32")
-          scores.append(score)
+        for sk in score_keys:
+            score = stats_h5[sk][:]
+            if target_slice is not None:
+                score = score[..., target_slice]
+            score = np.nan_to_num(score).astype("float32")
+            scores.append(score)
 
     # S x V x T to V x (ST)
     scores = np.concatenate(scores, axis=-1)
     return scores
+
 
 ################################################################################
 # __main__

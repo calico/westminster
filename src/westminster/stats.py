@@ -18,8 +18,9 @@ import numpy as np
 from scipy.stats import wilcoxon, ttest_rel
 import seaborn as sns
 
+
 def jointplot(ref_cors, exp_cors, label1, label2, alpha=1, out_pdf=None, title=None):
-    """"
+    """ "
     My preferred jointplot settings.
 
     Args:

@@ -25,6 +25,7 @@ westminster_evalg_folds.py
 Measure accuracy at gene-level for multiple model replicates.
 """
 
+
 ################################################################################
 # main
 ################################################################################
@@ -47,11 +48,11 @@ def main():
         help="Training output directory [Default: %default]",
     )
     parser.add_option(
-        '--pseudo_qtl',
-        dest='pseudo_qtl',
+        "--pseudo_qtl",
+        dest="pseudo_qtl",
         default=None,
-        type='float',
-        help='Quantile of coverage to add as pseudo counts to genes [Default: %default]',
+        type="float",
+        help="Quantile of coverage to add as pseudo counts to genes [Default: %default]",
     )
     parser.add_option(
         "--rc",
@@ -133,7 +134,8 @@ def main():
     parser.add_option(
         "-g",
         dest="genes_gtf",
-        default="%s/genes/gencode41/gencode41_basic_protein.gtf" % os.environ.get('BORZOI_HG38', 'hg38'),
+        default="%s/genes/gencode41/gencode41_basic_protein.gtf"
+        % os.environ.get("BORZOI_HG38", "hg38"),
     )
     parser.add_option(
         "--name",
@@ -141,11 +143,7 @@ def main():
         default="test",
         help="SLURM name prefix [Default: %default]",
     )
-    parser.add_option(
-        "-q",
-        dest="queue",
-        default="geforce"
-    )
+    parser.add_option("-q", dest="queue", default="geforce")
     parser.add_option(
         "-s",
         dest="sub_dir",
@@ -163,7 +161,7 @@ def main():
 
     #######################################################
     # prep work
-    
+
     # read data parameters
     data_stats_file = f"{data_dir}/statistics.json"
     with open(data_stats_file) as data_stats_open:
@@ -171,7 +169,7 @@ def main():
 
     # count folds
     num_folds = len([dkey for dkey in data_stats if dkey.startswith("fold")])
-  
+
     # select specific folds to evaluate
     if options.fold_subset_list is None:
         # focus on initial folds
@@ -205,7 +203,7 @@ def main():
             # check if done
             acc_file = f"{eval_dir}/acc.txt"
             if os.path.isfile(acc_file):
-                print(f'{acc_file} already generated.')
+                print(f"{acc_file} already generated.")
             else:
                 # evaluate
                 cmd = (
@@ -219,11 +217,11 @@ def main():
                 cmd += f" -o {eval_dir}"
                 cmd += f" --seq_step {options.seq_step}"
                 if options.pseudo_qtl is not None:
-                    cmd += ' --pseudo_qtl %.2f' % options.pseudo_qtl
+                    cmd += " --pseudo_qtl %.2f" % options.pseudo_qtl
                 if options.rc:
                     cmd += " --rc"
                 if options.save_span:
-                    cmd += ' --save_span'
+                    cmd += " --save_span"
                 if options.shifts:
                     cmd += f" --shifts {options.shifts}"
                 if options.span:
@@ -254,6 +252,7 @@ def main():
 
     slurm.multi_run(jobs, verbose=True)
 
+
 def get_model_file(it_dir, di):
     """Find model file in it_dir, robust to pytorch or tensorflow."""
     # pytorch
@@ -266,8 +265,9 @@ def get_model_file(it_dir, di):
             model_file = f"{it_dir}/train/model{di}_best.h5"
             if not os.path.isfile(model_file):
                 model_file = ""
-                print(f"No model in {it_dir}")                
+                print(f"No model in {it_dir}")
     return model_file
+
 
 ################################################################################
 # __main__

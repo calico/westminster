@@ -226,7 +226,9 @@ def main():
 
                 # copy params into output directory
                 if options.transfer:
-                    pretrained_model = f"{options.transfer}/f{fi}c{ci}/train/model_best.pth"
+                    pretrained_model = (
+                        f"{options.transfer}/f{fi}c{ci}/train/model_best.pth"
+                    )
                 else:
                     pretrained_model = None
                 make_rep_params(params_file, rep_dir, pretrained_model)
@@ -346,9 +348,10 @@ def make_rep_data(data_dir, rep_data_dir, fi, ci, identical_crosses):
         rep_train_dir = f"{rep_examples_dir}/train{tfi}.zarr"
         os.symlink(data_train_dir, rep_train_dir)
 
+
 def make_rep_params(params_file, rep_dir, pretrained_model):
     """Copy params file, including pretained model path.
-    
+
     Args:
         params_file (str): Path to the original params file.
         rep_dir (str): Directory where the new params file will be created.
@@ -360,8 +363,11 @@ def make_rep_params(params_file, rep_dir, pretrained_model):
             print(line, file=rep_params_open, end="")
             if line.strip() == '"model": {':
                 if pretrained_model is not None:
-                    print(f'        "pretrained_model": "{pretrained_model}",', file=rep_params_open)
-    
+                    print(
+                        f'        "pretrained_model": "{pretrained_model}",',
+                        file=rep_params_open,
+                    )
+
 
 def options_string(options, train_options, rep_dir):
     options_str = ""
