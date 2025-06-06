@@ -216,7 +216,7 @@ def main():
 
                         if options.test_only and ei != fi:
                             continue
-                        if options.valid_only and ei != fi+1:
+                        if options.valid_only and ei != fi + 1:
                             continue
 
                         # symlink test metrics
@@ -345,7 +345,7 @@ def get_model_file(it_dir, di):
             model_file = f"{it_dir}/train/model{di}_best.h5"
             if not os.path.isfile(model_file):
                 model_file = ""
-                print(f"No model in {it_dir}")                
+                print(f"No model in {it_dir}")
     return model_file
 
 

@@ -15,15 +15,12 @@
 # =========================================================================
 
 from optparse import OptionParser, OptionGroup
-import glob
 import json
 import os
 import pdb
 import shutil
 
-from natsort import natsorted
-
-import slurm
+import slurmrunner
 
 """
 westminster_train_folds.py
@@ -111,6 +108,13 @@ def main():
         help="Run a subset of folds (encoded as comma-separated string) [Default:%default]",
     )
     rep_options.add_option(
+        "--identical_crosses",
+        dest="identical_crosses",
+        default=False,
+        action="store_true",
+        help="Force all crosses to use the same validation fold [Default: %default]",
+    )
+    rep_options.add_option(
         "--name",
         dest="name",
         default="fold",
@@ -140,11 +144,9 @@ def main():
         help="Setup folds data directory only [Default: %default]",
     )
     rep_options.add_option(
-        "--identical_crosses",
-        dest="identical_crosses",
-        default=False,
-        action="store_true",
-        help="Force all crosses to use the same validation fold [Default: %default]",
+        "--transfer",
+        dest="transfer",
+        help="Transfer learn model directory",
     )
     parser.add_option_group(rep_options)
 
@@ -168,9 +170,6 @@ def main():
     with open(params_file) as params_open:
         params = json.load(params_open)
     params_train = params["train"]
-
-    # copy params into output directory
-    shutil.copy(params_file, f"{options.out_dir}/params.json")
 
     # read data parameters
     num_data = len(data_dirs)
@@ -225,6 +224,15 @@ def main():
                 # collect data directories
                 rep_data_dirs = [f"{rep_dir}/data{di}" for di in range(num_data)]
 
+                # copy params into output directory
+                if options.transfer:
+                    pretrained_model = (
+                        f"{options.transfer}/f{fi}c{ci}/train/model_best.pth"
+                    )
+                else:
+                    pretrained_model = None
+                make_rep_params(params_file, rep_dir, pretrained_model)
+
                 # train command
                 cmd = (
                     (". %s; " % os.environ["BASKERVILLE_CONDA"])
@@ -236,14 +244,14 @@ def main():
 
                 cmd += " hound_train.py"
                 cmd += " %s" % options_string(options, train_options, rep_dir)
-                cmd += " %s %s" % (params_file, " ".join(rep_data_dirs))
+                cmd += " %s/params.json %s" % (rep_dir, " ".join(rep_data_dirs))
 
                 name = f"{options.name}-train-f{fi}c{ci}"
                 sbf = os.path.abspath(f"{rep_dir}/train.sb")
                 outf = os.path.abspath(f"{rep_dir}/train.out")
                 errf = os.path.abspath(f"{rep_dir}/train.err")
 
-                j = slurm.Job(
+                j = slurmrunner.Job(
                     cmd,
                     name,
                     outf,
@@ -257,7 +265,7 @@ def main():
                 )
                 jobs.append(j)
 
-    slurm.multi_run(
+    slurmrunner.multi_run(
         jobs, max_proc=options.processes, verbose=True, launch_sleep=10, update_sleep=60
     )
 
@@ -339,6 +347,26 @@ def make_rep_data(data_dir, rep_data_dir, fi, ci, identical_crosses):
         data_train_dir = f"{data_examples_dir}/fold{tfi}.zarr"
         rep_train_dir = f"{rep_examples_dir}/train{tfi}.zarr"
         os.symlink(data_train_dir, rep_train_dir)
+
+
+def make_rep_params(params_file, rep_dir, pretrained_model):
+    """Copy params file, including pretained model path.
+
+    Args:
+        params_file (str): Path to the original params file.
+        rep_dir (str): Directory where the new params file will be created.
+        pretrained_model (str): Path to the pretrained model, if any.
+    """
+    rep_params_file = f"{rep_dir}/params.json"
+    with open(rep_params_file, "w") as rep_params_open:
+        for line in open(params_file):
+            print(line, file=rep_params_open, end="")
+            if line.strip() == '"model": {':
+                if pretrained_model is not None:
+                    print(
+                        f'        "pretrained_model": "{pretrained_model}",',
+                        file=rep_params_open,
+                    )
 
 
 def options_string(options, train_options, rep_dir):

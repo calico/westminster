@@ -435,19 +435,25 @@ def main():
 
     jobs = []
     for ci in range(options.crosses):
-        for fi in range(1,options.num_folds):
+        for fi in range(1, options.num_folds):
             it_dir = f"{exp_dir}/f{fi}c{ci}"
             it_out_dir = f"{it_dir}/{gnomad_out_dir}"
 
             for snp_stat in classify_stats:
-                stat_label = snp_stat.replace(',', '-')
-                class_out_dir = f"{it_out_dir}/class{options.variants_label}-{stat_label}"
+                stat_label = snp_stat.replace(",", "-")
+                class_out_dir = (
+                    f"{it_out_dir}/class{options.variants_label}-{stat_label}"
+                )
                 if options.class_name is not None:
                     class_out_dir += f"-{options.class_name}"
 
                 if not os.path.isfile(f"{class_out_dir}/stats.txt"):
-                    scores_rare_file = f"{it_out_dir}/rare{options.variants_label}/scores.h5"
-                    scores_common_file = f"{it_out_dir}/common{options.variants_label}/scores.h5"
+                    scores_rare_file = (
+                        f"{it_out_dir}/rare{options.variants_label}/scores.h5"
+                    )
+                    scores_common_file = (
+                        f"{it_out_dir}/common{options.variants_label}/scores.h5"
+                    )
 
                     cmd_class = f"{cmd_base} -o {class_out_dir}"
                     cmd_class += f" --stat {snp_stat}"
@@ -470,7 +476,7 @@ def main():
     # ensemble
     it_out_dir = f"{exp_dir}/ensemble/{gnomad_out_dir}"
     for snp_stat in classify_stats:
-        stat_label = snp_stat.replace(',', '-')
+        stat_label = snp_stat.replace(",", "-")
         class_out_dir = f"{it_out_dir}/class{options.variants_label}-{stat_label}"
         if options.class_name is not None:
             class_out_dir += f"-{options.class_name}"
@@ -478,7 +484,7 @@ def main():
         if not os.path.isfile(f"{class_out_dir}/stats.txt"):
             scores_rare_file = f"{ens_rare_dir}/scores.h5"
             scores_common_file = f"{ens_common_dir}/scores.h5"
-            
+
             cmd_class = f"{cmd_base} -o {class_out_dir}"
             cmd_class += f" --stat {snp_stat}"
             cmd_class += f" {scores_rare_file} {scores_common_file}"
