@@ -286,18 +286,18 @@ def read_scores(
     Returns:
       np.array: eQTL predictions
     """
+    targets_file = gtex_scores_file.replace('scores.h5', 'targets.txt')
+    targets_df = pd.read_csv(targets_file, sep='\t', index_col=0)
+
     with h5py.File(gtex_scores_file, "r") as gtex_scores_h5:
         score_ref = np.array(
             [ref.decode("UTF-8") for ref in gtex_scores_h5["ref_allele"]]
         )
 
         # determine matching GTEx targets
-        target_ids = np.array(
-            [ref.decode("UTF-8") for ref in gtex_scores_h5["target_ids"]]
-        )
-        target_labels = np.array(
-            [ref.decode("UTF-8") for ref in gtex_scores_h5["target_labels"]]
-        )
+        target_ids = targets_df.identifier.values
+        target_labels = targets_df.description.values
+
         match_tis = []
         for ti in range(len(target_ids)):
             if (
@@ -347,6 +347,10 @@ def classify_auroc(
       np.array: eQTL predictions
     """
     gtex_nscores_file = gtex_scores_file.replace("_pos", "_neg")
+
+    targets_file = gtex_nscores_file.replace('scores.h5', 'targets.txt')
+    targets_df = pd.read_csv(targets_file, sep='\t', index_col=0)
+
     with h5py.File(gtex_nscores_file, "r") as gtex_scores_h5:
         variant_ref = np.array(
             [ref.decode("UTF-8") for ref in gtex_scores_h5["ref_allele"]]
@@ -356,12 +360,9 @@ def classify_auroc(
         )
 
         # determine matching GTEx targets
-        target_ids = np.array(
-            [ref.decode("UTF-8") for ref in gtex_scores_h5["target_ids"]]
-        )
-        target_labels = np.array(
-            [ref.decode("UTF-8") for ref in gtex_scores_h5["target_labels"]]
-        )
+        target_ids = targets_df.identifier.values
+        target_labels = targets_df.description.values
+
         match_tis = []
         for ti in range(len(target_ids)):
             if (
