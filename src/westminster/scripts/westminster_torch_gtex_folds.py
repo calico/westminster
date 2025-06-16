@@ -16,6 +16,7 @@
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import glob
 import os
+import shutil
 
 import h5py
 import numpy as np
@@ -46,10 +47,10 @@ def main():
     snp_group = parser.add_argument_group("hound_snp.py options")
     snp_group.add_argument(
         "-c",
-        dest="cluster_snps_pct",
+        dest="cluster_pct",
         default=0,
         type=float,
-        help="Cluster SNPs within a %% of the seq length to make a single ref pred",
+        help="Cluster SNPs (or genes) within a %% of the seq length to make a single ref pred",
     )
     snp_group.add_argument(
         "-f",
@@ -100,8 +101,7 @@ def main():
     snp_group.add_argument(
         "-t",
         dest="targets_file",
-        default=None,
-        type=str,
+        required=True,
         help="File specifying target indexes and labels in table format",
     )
 
@@ -153,7 +153,7 @@ def main():
     fold_group.add_argument(
         "-j",
         dest="job_size",
-        default=128,
+        default=256,
         type=int,
         help="Number of SNPs to process per job",
     )
@@ -269,48 +269,6 @@ def main():
     # split ensemble negatives
     split_sad(ens_out_dir, "neg", args.gtex_vcf_dir, snp_stats)
 
-    ################################################################
-    # ensemble
-
-    # ensemble_dir = f"{args.models_dir}/ensemble"
-    # if not os.path.isdir(ensemble_dir):
-    #     os.mkdir(ensemble_dir)
-
-    # gtex_dir = f"{ensemble_dir}/{gtex_out_dir}"
-    # if not os.path.isdir(gtex_dir):
-    #     os.mkdir(gtex_dir)
-
-    # for gtex_pos_vcf in glob.glob(f"{args.gtex_vcf_dir}/*_pos.vcf"):
-    #     gtex_neg_vcf = gtex_pos_vcf.replace("_pos.", "_neg.")
-    #     pos_base = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0]
-    #     neg_base = os.path.splitext(os.path.split(gtex_neg_vcf)[1])[0]
-
-    #     # collect SAD files
-    #     sad_pos_files = []
-    #     sad_neg_files = []
-    #     for ci in range(args.crosses):
-    #         for fi in fold_index:
-    #             it_dir = f"{args.models_dir}/f{fi}c{ci}"
-    #             it_out_dir = f"{it_dir}/{gtex_out_dir}"
-
-    #             sad_pos_file = f"{it_out_dir}/{pos_base}/scores.h5"
-    #             sad_pos_files.append(sad_pos_file)
-
-    #             sad_neg_file = f"{it_out_dir}/{neg_base}/scores.h5"
-    #             sad_neg_files.append(sad_neg_file)
-
-    #     # ensemble
-    #     ens_pos_dir = f"{gtex_dir}/{pos_base}"
-    #     os.makedirs(ens_pos_dir, exist_ok=True)
-    #     ens_pos_file = f"{ens_pos_dir}/scores.h5"
-    #     if not os.path.isfile(ens_pos_file):
-    #         ensemble_sad_h5(ens_pos_file, sad_pos_files)
-
-    #     ens_neg_dir = f"{gtex_dir}/{neg_base}"
-    #     os.makedirs(ens_neg_dir, exist_ok=True)
-    #     ens_neg_file = f"{ens_neg_dir}/scores.h5"
-    #     if not os.path.isfile(ens_neg_file):
-    #         ensemble_sad_h5(ens_neg_file, sad_neg_files)
 
     ################################################################
     # fit classifiers
@@ -462,6 +420,7 @@ def split_sad(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
       vcf_dir (str): directory containing tissue-specific VCFs.
       snp_stats ([str]]): list of SAD stats.
     """
+    targets_file = f"{it_out_dir}/merge_{posneg}/targets.txt"
     merge_h5_file = f"{it_out_dir}/merge_{posneg}/scores.h5"
     merge_h5 = h5py.File(merge_h5_file, "r")
 
@@ -506,9 +465,14 @@ def split_sad(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
                     si = snp_si[snp]
                     sad_scores[ss].append(merge_scores[ss][si])
 
-        # write tissue HDF5
+        # prep tissue dir
         tissue_dir = f"{it_out_dir}/{tissue_label}_{posneg}"
         os.makedirs(tissue_dir, exist_ok=True)
+
+        # copy tissue targets
+        shutil.copyfile(targets_file, f"{tissue_dir}/targets.txt")
+
+        # write tissue HDF5
         with h5py.File(f"{tissue_dir}/scores.h5", "w") as tissue_h5:
             # write SNPs
             tissue_h5.create_dataset("snp", data=np.array(sad_snp, "S"))
@@ -524,10 +488,6 @@ def split_sad(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
 
             # write alt allele
             tissue_h5.create_dataset("alt_allele", data=np.array(sad_alt, dtype="S"))
-
-            # write targets
-            tissue_h5.create_dataset("target_ids", data=merge_h5["target_ids"])
-            tissue_h5.create_dataset("target_labels", data=merge_h5["target_labels"])
 
             # write sed stats
             for ss in snp_stats:
