@@ -269,7 +269,6 @@ def main():
     # split ensemble negatives
     split_sad(ens_out_dir, "neg", args.gtex_vcf_dir, snp_stats)
 
-
     ################################################################
     # fit classifiers
 

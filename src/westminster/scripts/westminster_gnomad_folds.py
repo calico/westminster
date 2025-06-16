@@ -277,9 +277,7 @@ def main():
 
             for snp_stat in classify_stats:
                 stat_label = snp_stat.replace(",", "-")
-                class_out_dir = (
-                    f"{it_out_dir}/class{args.variants_label}-{stat_label}"
-                )
+                class_out_dir = f"{it_out_dir}/class{args.variants_label}-{stat_label}"
                 if args.class_name is not None:
                     class_out_dir += f"-{args.class_name}"
 
@@ -312,7 +310,7 @@ def main():
     ensemble_out_dir = f"{args.models_dir}/ensemble/{gnomad_out_dir}"
     ens_rare_dir = f"{ensemble_out_dir}/rare{args.variants_label}"
     ens_common_dir = f"{ensemble_out_dir}/common{args.variants_label}"
-    
+
     for snp_stat in classify_stats:
         stat_label = snp_stat.replace(",", "-")
         class_out_dir = f"{ensemble_out_dir}/class{args.variants_label}-{stat_label}"
