@@ -59,6 +59,12 @@ def main():
         help="Genome FASTA for sequences",
     )
     snp_group.add_argument(
+        "-g",
+        dest="genes_gtf",
+        default=None,
+        help="Trigger gene scoring mode; provide GTF for gene definitions (skips splitting & classifiers)",
+    )
+    snp_group.add_argument(
         "--head",
         dest="head",
         default=0,
@@ -71,6 +77,13 @@ def main():
         default=False,
         action="store_true",
         help="Stitch indel compensation shifts",
+    )
+    snp_group.add_argument(
+        "-n",
+        "--norm",
+        dest="norm_subdir",
+        default=None,
+        help="Model directory subdirectory containing normalization HDF5 files for each fold",
     )
     snp_group.add_argument(
         "-o",
@@ -91,6 +104,13 @@ def main():
         default="0",
         type=str,
         help="Ensemble prediction shifts",
+    )
+    snp_group.add_argument(
+        "--span",
+        dest="span",
+        default=False,
+        action="store_true",
+        help="In gene scoring mode, aggregate entire gene span",
     )
     snp_group.add_argument(
         "--stats",
@@ -185,8 +205,8 @@ def main():
         type=int,
         help="Random forest min_samples_leaf",
     )
+    # GTEx directory
     gtex_group.add_argument(
-        "-g",
         "--gtex",
         dest="gtex_vcf_dir",
         default="/home/drk/seqnn/data/gtex_fine/susie_pip90r",
@@ -203,17 +223,10 @@ def main():
 
     # count folds
     if args.num_folds is None:
-        args.num_folds = 0
-        fold0_dir = f"{args.models_dir}/f{args.num_folds}c0"
-        # fold0_dir = f"{exp_dir}/f{args.num_folds}c0"
-        model_file = f"{fold0_dir}/train/model_best.pth"
-        while os.path.isfile(model_file):
-            args.num_folds += 1
-            fold0_dir = f"{args.models_dir}/f{args.num_folds}c0"
-            model_file = f"{fold0_dir}/train/model_best.pth"
+        args.num_folds = utils.detect_model_folds(args.models_dir)
         print(f"Found {args.num_folds} folds")
         if args.num_folds == 0:
-            exit(1)
+            raise ValueError(f"No models found in {args.models_dir}")
 
     # subset folds
     fold_index = [fold_i for fold_i in range(args.num_folds)]
@@ -257,100 +270,107 @@ def main():
             print(it_out_dir)
 
             # split positives
-            split_sad(it_out_dir, "pos", args.gtex_vcf_dir, snp_stats)
+            split_scores(it_out_dir, "pos", args.gtex_vcf_dir, snp_stats)
 
             # split negatives
-            split_sad(it_out_dir, "neg", args.gtex_vcf_dir, snp_stats)
+            split_scores(it_out_dir, "neg", args.gtex_vcf_dir, snp_stats)
 
     # split ensemble positives
     ens_out_dir = f"{args.models_dir}/ensemble/{gtex_out_dir}"
-    split_sad(ens_out_dir, "pos", args.gtex_vcf_dir, snp_stats)
+    split_scores(ens_out_dir, "pos", args.gtex_vcf_dir, snp_stats)
 
     # split ensemble negatives
-    split_sad(ens_out_dir, "neg", args.gtex_vcf_dir, snp_stats)
+    split_scores(ens_out_dir, "neg", args.gtex_vcf_dir, snp_stats)
 
     ################################################################
     # fit classifiers
 
-    # SNPs (random forest)
-    # cmd_base = "westminster_classify.py -f 8 -i 20 -n 512 -s"
-    # SNPs (xgboost)
-    cmd_base = "westminster_classify.py -f 8 -i 20 -n 96 -s -x"
-    # indels
-    # cmd_base = 'westminster_classify.py -f 6 -i 64 -s'
-    cmd_base += f" --msl {args.msl}"
+    if args.genes_gtf is None:
 
-    if args.class_targets_file is not None:
-        cmd_base += f" -t {args.class_targets_file}"
+        # SNPs (random forest)
+        # cmd_base = "westminster_classify.py -f 8 -i 20 -n 512 -s"
+        # SNPs (xgboost)
+        cmd_base = "westminster_classify.py -f 8 -i 20 -n 96 -s -x"
+        # indels
+        # cmd_base = 'westminster_classify.py -f 6 -i 64 -s'
+        cmd_base += f" --msl {args.msl}"
 
-    jobs = []
-    for ci in range(args.crosses):
-        for fi in fold_index:
-            it_dir = f"{args.models_dir}/f{fi}c{ci}"
-            it_out_dir = f"{it_dir}/{gtex_out_dir}"
+        if args.class_targets_file is not None:
+            cmd_base += f" -t {args.class_targets_file}"
 
-            for gtex_pos_vcf in glob.glob(f"{args.gtex_vcf_dir}/*_pos.vcf"):
-                tissue = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0][:-4]
-                sad_pos = f"{it_out_dir}/{tissue}_pos/scores.h5"
-                sad_neg = f"{it_out_dir}/{tissue}_neg/scores.h5"
-                for snp_stat in snp_stats:
-                    class_out_dir = f"{it_out_dir}/{tissue}_class-{snp_stat}"
-                    if args.class_name is not None:
-                        class_out_dir += f"-{args.class_name}"
-                    if not os.path.isfile(f"{class_out_dir}/stats.txt"):
-                        cmd_class = f"{cmd_base} -o {class_out_dir} --stat {snp_stat}"
-                        cmd_class += f" {sad_pos} {sad_neg}"
-                        if args.local:
-                            jobs.append(cmd_class)
-                        else:
-                            j = slurm.Job(
-                                cmd_class,
-                                tissue,
-                                f"{class_out_dir}.out",
-                                f"{class_out_dir}.err",
-                                queue="standard",
-                                cpu=2,
-                                mem=22000,
-                                time="1-0:0:0",
+        jobs = []
+        for ci in range(args.crosses):
+            for fi in fold_index:
+                it_dir = f"{args.models_dir}/f{fi}c{ci}"
+                it_out_dir = f"{it_dir}/{gtex_out_dir}"
+
+                for gtex_pos_vcf in glob.glob(f"{args.gtex_vcf_dir}/*_pos.vcf"):
+                    tissue = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0][:-4]
+                    sad_pos = f"{it_out_dir}/{tissue}_pos/scores.h5"
+                    sad_neg = f"{it_out_dir}/{tissue}_neg/scores.h5"
+                    for snp_stat in snp_stats:
+                        class_out_dir = f"{it_out_dir}/{tissue}_class-{snp_stat}"
+                        if args.class_name is not None:
+                            class_out_dir += f"-{args.class_name}"
+                        if not os.path.isfile(f"{class_out_dir}/stats.txt"):
+                            cmd_class = (
+                                f"{cmd_base} -o {class_out_dir} --stat {snp_stat}"
                             )
-                            jobs.append(j)
+                            cmd_class += f" {sad_pos} {sad_neg}"
+                            if args.local:
+                                jobs.append(cmd_class)
+                            else:
+                                j = slurm.Job(
+                                    cmd_class,
+                                    tissue,
+                                    f"{class_out_dir}.out",
+                                    f"{class_out_dir}.err",
+                                    queue="standard",
+                                    cpu=2,
+                                    mem=22000,
+                                    time="1-0:0:0",
+                                )
+                                jobs.append(j)
 
-    # ensemble
-    for gtex_pos_vcf in glob.glob(f"{args.gtex_vcf_dir}/*_pos.vcf"):
-        tissue = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0][:-4]
-        sad_pos = f"{ens_out_dir}/{tissue}_pos/scores.h5"
-        sad_neg = f"{ens_out_dir}/{tissue}_neg/scores.h5"
-        for snp_stat in snp_stats:
-            class_out_dir = f"{ens_out_dir}/{tissue}_class-{snp_stat}"
-            if args.class_name is not None:
-                class_out_dir += f"-{args.class_name}"
-            if not os.path.isfile(f"{class_out_dir}/stats.txt"):
-                cmd_class = f"{cmd_base} -o {class_out_dir} --stat {snp_stat}"
-                cmd_class += f" {sad_pos} {sad_neg}"
-                if args.local:
-                    jobs.append(cmd_class)
-                else:
-                    j = slurm.Job(
-                        cmd_class,
-                        tissue,
-                        f"{class_out_dir}.out",
-                        f"{class_out_dir}.err",
-                        queue="standard",
-                        cpu=2,
-                        mem=22000,
-                        time="1-0:0:0",
-                    )
-                    jobs.append(j)
+        # ensemble
+        for gtex_pos_vcf in glob.glob(f"{args.gtex_vcf_dir}/*_pos.vcf"):
+            tissue = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0][:-4]
+            sad_pos = f"{ens_out_dir}/{tissue}_pos/scores.h5"
+            sad_neg = f"{ens_out_dir}/{tissue}_neg/scores.h5"
+            for snp_stat in snp_stats:
+                class_out_dir = f"{ens_out_dir}/{tissue}_class-{snp_stat}"
+                if args.class_name is not None:
+                    class_out_dir += f"-{args.class_name}"
+                if not os.path.isfile(f"{class_out_dir}/stats.txt"):
+                    cmd_class = f"{cmd_base} -o {class_out_dir} --stat {snp_stat}"
+                    cmd_class += f" {sad_pos} {sad_neg}"
+                    if args.local:
+                        jobs.append(cmd_class)
+                    else:
+                        j = slurm.Job(
+                            cmd_class,
+                            tissue,
+                            f"{class_out_dir}.out",
+                            f"{class_out_dir}.err",
+                            queue="standard",
+                            cpu=2,
+                            mem=22000,
+                            time="1-0:0:0",
+                        )
+                        jobs.append(j)
 
-    if args.local:
-        util.exec_par(jobs, 3, verbose=True)
-    else:
-        slurm.multi_run(jobs, verbose=True)
+        if args.local:
+            util.exec_par(jobs, 3, verbose=True)
+        else:
+            slurm.multi_run(jobs, verbose=True)
 
     ################################################################
     # coefficient analysis
 
-    cmd_base = f"westminster_gtex_coef.py -g {args.gtex_vcf_dir}"
+    if args.genes_gtf is None:
+        cmd_base = f"westminster_gtex_coef.py -g {args.gtex_vcf_dir}"
+    else:
+        cmd_base = f"westminster_gtexg_coef.py -g {args.gtex_vcf_dir}"
 
     jobs = []
     for ci in range(args.crosses):
@@ -409,92 +429,117 @@ def main():
         slurm.multi_run(jobs, verbose=True)
 
 
-def split_sad(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
-    """Split merged VCF predictions in HDF5 into tissue-specific
-    predictions in HDF5.
+def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
+    """Split merged SNP scores into tissue-specific files.
+
+    Supports both standard SNP-level scoring and gene-specific scoring.
+    Gene-specific merged files contain the extra datasets:
+      gene_ids, snp_idx, gene_idx
+    where each row in the stats corresponds to a (snp_idx, gene_idx) pair.
 
     Args:
-      it_out_dir (str): output directory for iteration.
-      posneg (str): 'pos' or 'neg'.
-      vcf_dir (str): directory containing tissue-specific VCFs.
-      snp_stats ([str]]): list of SAD stats.
+        it_out_dir (str): Output iteration directory containing merge_{posneg}.
+        posneg (str): 'pos' or 'neg'.
+        vcf_dir (str): Directory with tissue VCFs (*_{posneg}.vcf).
+        snp_stats (list[str]): List of statistics stored in merged file.
     """
-    targets_file = f"{it_out_dir}/merge_{posneg}/targets.txt"
-    merge_h5_file = f"{it_out_dir}/merge_{posneg}/scores.h5"
-    merge_h5 = h5py.File(merge_h5_file, "r")
+    merge_dir = f"{it_out_dir}/merge_{posneg}"
+    targets_file = f"{merge_dir}/targets.txt"
+    merge_h5_file = f"{merge_dir}/scores.h5"
 
-    # read merged data
-    snps = [snp.decode("UTF-8") for snp in merge_h5["snp"]]
-    merge_scores = {}
-    for ss in snp_stats:
-        merge_scores[ss] = merge_h5[ss][:]
+    if not os.path.exists(merge_h5_file):
+        raise FileNotFoundError(f"Merged HDF5 file not found: {merge_h5_file}")
 
-    # hash snp indexes
-    snp_si = dict(zip(snps, np.arange(len(snps))))
+    with h5py.File(merge_h5_file, "r") as merge_h5:
+        # detect gene-specific format
+        gene_specific = (
+            "gene_ids" in merge_h5 and "snp_idx" in merge_h5 and "gene_idx" in merge_h5
+        )
 
-    # for each tissue VCF
-    vcf_glob = f"{vcf_dir}/*_{posneg}.vcf"
-    for tissue_vcf_file in glob.glob(vcf_glob):
-        tissue_label = tissue_vcf_file.split("/")[-1]
-        tissue_label = tissue_label.replace("_pos.vcf", "")
-        tissue_label = tissue_label.replace("_neg.vcf", "")
+        merge_scores = {ss: merge_h5[ss][:] for ss in snp_stats}
+        snps = [s.decode("utf-8") for s in merge_h5["snp"]]
+        snp_index = {snp_id: i for i, snp_id in enumerate(snps)}
 
-        # initialize HDF5 arrays
-        sad_snp = []
-        sad_chr = []
-        sad_pos = []
-        sad_ref = []
-        sad_alt = []
-        sad_scores = {}
-        for ss in snp_stats:
-            sad_scores[ss] = []
+        if gene_specific:
+            gene_ids = [g.decode("utf-8") for g in merge_h5["gene_ids"]]
+            snp_idx_map = merge_h5["snp_idx"][:]  # row -> base snp index
+            gene_idx_map = merge_h5["gene_idx"][:]  # row -> base gene index
+            snp_to_rows = {}
+            for row_i, base_snp_i in enumerate(snp_idx_map):
+                snp_id = snps[int(base_snp_i)]
+                snp_to_rows.setdefault(snp_id, []).append(row_i)
+        else:
+            snp_to_rows = None
 
-        # fill HDF5 arrays with ordered SNPs
-        for line in open(tissue_vcf_file):
-            if not line.startswith("#"):
-                a = line.split()
-                chrm, pos, snp, ref, alt = a[:5]
-                sad_snp.append(snp)
-                sad_chr.append(chrm)
-                sad_pos.append(int(pos))
-                sad_ref.append(ref)
-                sad_alt.append(alt)
+        # iterate VCFs
+        for tissue_vcf in glob.glob(f"{vcf_dir}/*_{posneg}.vcf"):
+            tissue_label = os.path.basename(tissue_vcf)
+            tissue_label = tissue_label.replace("_pos.vcf", "").replace("_neg.vcf", "")
 
-                for ss in snp_stats:
-                    si = snp_si[snp]
-                    sad_scores[ss].append(merge_scores[ss][si])
+            tissue_snps = []
+            tissue_chr = []
+            tissue_pos = []
+            tissue_ref = []
+            tissue_alt = []
+            # gene-specific row accumulation
+            selected_rows = []
 
-        # prep tissue dir
-        tissue_dir = f"{it_out_dir}/{tissue_label}_{posneg}"
-        os.makedirs(tissue_dir, exist_ok=True)
+            with open(tissue_vcf) as vf:
+                for line in vf:
+                    if line.startswith("#"):
+                        continue
+                    a = line.split()
+                    chrm, pos, snp_id, ref, alt = a[:5]
+                    if snp_id not in snp_index:
+                        raise ValueError(
+                            f"SNP {snp_id} from {tissue_vcf} not found in {merge_h5_file}"
+                        )
+                    tissue_snps.append(snp_id)
+                    tissue_chr.append(chrm)
+                    tissue_pos.append(int(pos))
+                    tissue_ref.append(ref)
+                    tissue_alt.append(alt)
+                    if gene_specific:
+                        selected_rows.extend(snp_to_rows.get(snp_id, []))
 
-        # copy tissue targets
-        shutil.copyfile(targets_file, f"{tissue_dir}/targets.txt")
+            tissue_dir = f"{it_out_dir}/{tissue_label}_{posneg}"
+            os.makedirs(tissue_dir, exist_ok=True)
+            if os.path.exists(targets_file):
+                shutil.copyfile(targets_file, f"{tissue_dir}/targets.txt")
 
-        # write tissue HDF5
-        with h5py.File(f"{tissue_dir}/scores.h5", "w") as tissue_h5:
-            # write SNPs
-            tissue_h5.create_dataset("snp", data=np.array(sad_snp, "S"))
+            out_h5_path = f"{tissue_dir}/scores.h5"
+            with h5py.File(out_h5_path, "w") as out_h5:
+                out_h5.create_dataset("progress_status", data="completed".encode("utf-8"))
+                out_h5.create_dataset("snp", data=np.array(tissue_snps, dtype="S"))
+                out_h5.create_dataset("chr", data=np.array(tissue_chr, dtype="S"))
+                out_h5.create_dataset("pos", data=np.array(tissue_pos, dtype="uint32"))
+                out_h5.create_dataset("ref_allele", data=np.array(tissue_ref, dtype="S"))
+                out_h5.create_dataset("alt_allele", data=np.array(tissue_alt, dtype="S"))
 
-            # write SNP chr
-            tissue_h5.create_dataset("chr", data=np.array(sad_chr, "S"))
+                if gene_specific:
+                    # order rows grouped by tissue SNP order
+                    ordered_rows = []
+                    for snp_id in tissue_snps:
+                        ordered_rows.extend(sorted(snp_to_rows.get(snp_id, [])))
+                    ordered_rows = np.array(ordered_rows, dtype=int)
 
-            # write SNP pos
-            tissue_h5.create_dataset("pos", data=np.array(sad_pos, dtype="uint32"))
+                    used_gene_indices = sorted({int(gene_idx_map[r]) for r in ordered_rows})
+                    oldgene_to_new = {g: i for i, g in enumerate(used_gene_indices)}
+                    new_gene_ids = [gene_ids[g] for g in used_gene_indices]
+                    out_h5.create_dataset("gene_ids", data=np.array(new_gene_ids, dtype="S"))
 
-            # write ref allele
-            tissue_h5.create_dataset("ref_allele", data=np.array(sad_ref, dtype="S"))
+                    oldsnp_to_new = {snp_index[snp_id]: i for i, snp_id in enumerate(tissue_snps)}
+                    new_snp_idx = np.array([oldsnp_to_new[int(snp_idx_map[r])] for r in ordered_rows], dtype="int64")
+                    new_gene_idx = np.array([oldgene_to_new[int(gene_idx_map[r])] for r in ordered_rows], dtype="int64")
+                    out_h5.create_dataset("snp_idx", data=new_snp_idx)
+                    out_h5.create_dataset("gene_idx", data=new_gene_idx)
 
-            # write alt allele
-            tissue_h5.create_dataset("alt_allele", data=np.array(sad_alt, dtype="S"))
-
-            # write sed stats
-            for ss in snp_stats:
-                tissue_h5.create_dataset(
-                    ss, data=np.array(sad_scores[ss], dtype="float16")
-                )
-
-    merge_h5.close()
+                    for ss in snp_stats:
+                        out_h5.create_dataset(ss, data=merge_scores[ss][ordered_rows].astype("float16"))
+                else:
+                    merged_indices = [snp_index[s] for s in tissue_snps]
+                    for ss in snp_stats:
+                        out_h5.create_dataset(ss, data=merge_scores[ss][merged_indices].astype("float16"))
 
 
 ################################################################################

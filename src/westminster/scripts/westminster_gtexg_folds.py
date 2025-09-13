@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # =========================================================================
-from optparse import OptionParser, OptionGroup
+from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import glob
 import pickle
 import pdb
@@ -23,7 +23,10 @@ import sys
 import h5py
 import numpy as np
 
-import slurm
+import slurmrunner
+
+import baskerville_torch.utils as utils
+from baskerville_torch.scripts.hound_snp_folds import snp_folds
 
 """
 westminster_gtexg_folds.py
@@ -36,223 +39,228 @@ Benchmark Baskerville model replicates on GTEx eQTL coefficient task.
 # main
 ################################################################################
 def main():
-    usage = "usage: %prog [options] <params_file> <data_dir>"
-    parser = OptionParser(usage)
+    parser = ArgumentParser(
+        description="Compute variant effect predictions for SNPs in a VCF file using cross-fold model ensemble.",
+        formatter_class=ArgumentDefaultsHelpFormatter,
+    )
 
-    # sed options
-    snp_options = OptionGroup(parser, "hound_snpgene.py options")
-    snp_options.add_option(
+    # snp options
+    snp_group = parser.add_argument_group("hound_snp.py options")
+    snp_group.add_argument(
         "-c",
         dest="cluster_pct",
         default=0,
-        type="float",
-        help="Cluster genes within a %% of the seq length to make a single ref pred [Default: %default]",
+        type=float,
+        help="Cluster SNPs (or genes) within a %% of the seq length to make a single ref pred",
     )
-    snp_options.add_option(
+    snp_group.add_argument(
         "-f",
         dest="genome_fasta",
-        default="%s/assembly/ucsc/hg38.fa" % os.environ["HG38"],
-        help="Genome FASTA for sequences [Default: %default]",
+        default=f"{os.environ['HG38']}/assembly/ucsc/hg38.fa",
+        help="Genome FASTA for sequences",
     )
-    snp_options.add_option(
-        "--float16",
-        dest="float16",
-        default=False,
-        action="store_true",
-        help="Use mixed float16 precision [Default: %default]",
-    )
-    snp_options.add_option(
+    snp_group.add_argument(
         "-g",
         dest="genes_gtf",
-        default="%s/genes/gencode41/gencode41_basic_nort.gtf" % os.environ["HG38"],
-        help="GTF for gene definition [Default %default]",
+        default=f"{os.environ['HG38']}/genes/gencode41/gencode41_basic_nort.gtf",
+        help="Trigger gene scoring mode, and provide GTF for gene definition",
     )
-    snp_options.add_option(
+    snp_group.add_argument(
+        "--head",
+        dest="head",
+        default=0,
+        type=int,
+        help="Model head with which to predict.",
+    )
+    snp_group.add_argument(
         "--indel_stitch",
         dest="indel_stitch",
         default=False,
         action="store_true",
-        help="Stitch indel compensation shifts [Default: %default]",
+        help="Stitch indel compensation shifts",
     )
-    snp_options.add_option(
+    snp_group.add_argument(
+        "-n",
+        "--norm",
+        dest="norm_subdir",
+        default=None,
+        help="Model directory subdirectory containing normalization HDF5 files for each fold",
+    )
+    snp_group.add_argument(
         "-o",
         dest="out_dir",
-        default="sed",
-        help="Output directory for tables and plots [Default: %default]",
+        default="snp_out",
+        help="Output directory for tables and plots",
     )
-    snp_options.add_option(
+    snp_group.add_argument(
         "--rc",
         dest="rc",
         default=False,
         action="store_true",
-        help="Average forward and reverse complement predictions [Default: %default]",
+        help="Average forward and reverse complement predictions",
     )
-    snp_options.add_option(
+    snp_group.add_argument(
         "--shifts",
         dest="shifts",
         default="0",
-        type="str",
-        help="Ensemble prediction shifts [Default: %default]",
+        type=str,
+        help="Ensemble prediction shifts",
     )
-    snp_options.add_option(
+    snp_group.add_argument(
         "--span",
         dest="span",
         default=False,
         action="store_true",
-        help="Aggregate entire gene span [Default: %default]",
+        help="Aggregate entire gene span",
     )
-    snp_options.add_option(
+    snp_group.add_argument(
         "--stats",
         dest="snp_stats",
         default="logSUM",
-        help="Comma-separated list of stats to save. [Default: %default]",
+        help="Comma-separated list of stats to save.",
     )
-    snp_options.add_option(
+    snp_group.add_argument(
         "-t",
         dest="targets_file",
-        default=None,
-        type="str",
+        required=True,
         help="File specifying target indexes and labels in table format",
     )
-    snp_options.add_option(
-        "-u", dest="untransform_old", default=False, action="store_true"
-    )
-    snp_options.add_option(
-        "--gcs",
-        dest="gcs",
-        default=False,
-        action="store_true",
-        help="Input and output are in gcs",
-    )
-    snp_options.add_option(
-        "--require_gpu",
-        dest="require_gpu",
-        default=False,
-        action="store_true",
-        help="Only run on GPU",
-    )
-    snp_options.add_option(
-        "--tensorrt",
-        dest="tensorrt",
-        default=False,
-        action="store_true",
-        help="Model type is tensorrt optimized",
-    )
-    parser.add_option_group(snp_options)
 
-    # cross-fold
-    fold_options = OptionGroup(parser, "cross-fold options")
-    fold_options.add_option(
-        "--crosses",
+    # cross-fold options
+    fold_group = parser.add_argument_group("cross-fold options")
+    fold_group.add_argument(
+        "--cross",
         dest="crosses",
         default=1,
-        type="int",
-        help="Number of cross-fold rounds [Default:%default]",
+        type=int,
+        help="Number of cross-fold rounds",
     )
-    fold_options.add_option(
-        "-d",
-        dest="data_head",
-        default=None,
-        type="int",
-        help="Index for dataset/head [Default: %default]",
+    fold_group.add_argument(
+        "-e", dest="conda_env", default="torch2.6", help="Anaconda environment"
     )
-    fold_options.add_option(
-        "-e",
-        dest="conda_env",
-        default="tf210",
-        help="Anaconda environment [Default: %default]",
+    fold_group.add_argument(
+        "--embed",
+        default=False,
+        action="store_true",
+        help="Embed output in the models directory",
     )
-    fold_options.add_option(
+    fold_group.add_argument(
         "--folds",
         dest="num_folds",
         default=None,
-        type="int",
-        help="Number of folds to evaluate [Default: %default]",
+        type=int,
+        help="Number of folds to evaluate",
     )
-    fold_options.add_option(
+    fold_group.add_argument(
         "--f_list",
         dest="fold_subset_list",
         default=None,
-        help="Subset of folds to evaluate (encoded as comma-separated string) [Default:%default]",
+        help="Subset of folds to evaluate (encoded as comma-separated string)",
     )
-    fold_options.add_option(
-        "--gtex",
-        dest="gtex_vcf_dir",
-        default="/home/drk/seqnn/data/gtex_fine/susie_pip90",
+    fold_group.add_argument(
+        "--local", dest="local", default=False, action="store_true", help="Run locally"
     )
-    fold_options.add_option(
-        "--name",
-        dest="name",
-        default="gtex",
-        help="SLURM name prefix [Default: %default]",
+    fold_group.add_argument(
+        "--name", dest="name", default="snp", help="SLURM name prefix"
     )
-    fold_options.add_option(
-        "--max_proc",
-        dest="max_proc",
-        default=None,
-        type="int",
-        help="Maximum concurrent processes [Default: %default]",
-    )
-    fold_options.add_option(
+    fold_group.add_argument(
         "-p",
-        dest="processes",
+        "--parallel_jobs",
+        dest="parallel_jobs",
         default=None,
-        type="int",
-        help="Number of processes, passed by multi script. \
-            (Unused, but needs to appear as dummy.)",
+        type=int,
+        help="Maximum number of jobs to run in parallel",
     )
-    fold_options.add_option(
+    fold_group.add_argument(
+        "-j",
+        dest="job_size",
+        default=256,
+        type=int,
+        help="Number of SNPs to process per job",
+    )
+    fold_group.add_argument(
         "-q",
         dest="queue",
         default="geforce",
-        help="SLURM queue on which to run the jobs [Default: %default]",
+        help="SLURM queue on which to run the jobs",
     )
-    parser.add_option_group(fold_options)
 
-    (options, args) = parser.parse_args()
+    # GTEx-specific options
+    gtex_group = parser.add_argument_group("GTEx options")
+    gtex_group.add_argument(
+        "--cn",
+        dest="class_name",
+        default=None,
+        help="Classifier name extension",
+    )
+    gtex_group.add_argument(
+        "--ct",
+        dest="class_targets_file",
+        default=None,
+        help="Targets slice for the classifier stage",
+    )
+    gtex_group.add_argument(
+        "--msl",
+        dest="msl",
+        default=1,
+        type=int,
+        help="Random forest min_samples_leaf",
+    )
+    gtex_group.add_argument(
+        "-g",
+        "--gtex",
+        dest="gtex_vcf_dir",
+        default="/home/drk/seqnn/data/gtex_fine/susie_pip90r",
+        help="Directory with GTEx VCF files",
+    )
 
-    if len(args) != 2:
-        parser.error("Must provide parameters file and cross-fold directory")
-    else:
-        params_file = args[0]
-        exp_dir = args[1]
+    # Positional arguments
+    parser.add_argument("params_file", help="Parameters file")
+    parser.add_argument("models_dir", help="Cross-fold models directory")
+    args = parser.parse_args()
 
     #######################################################
     # prep work
 
     # count folds
-    if options.num_folds is None:
-        options.num_folds = 0
-        fold0_dir = "%s/f%dc0" % (exp_dir, options.num_folds)
-        model_file = "%s/train/model_best.h5" % fold0_dir
-        if options.data_head is not None:
-            model_file = "%s/train/model%d_best.h5" % (fold0_dir, options.data_head)
-        while os.path.isfile(model_file):
-            options.num_folds += 1
-            fold0_dir = "%s/f%dc0" % (exp_dir, options.num_folds)
-            model_file = "%s/train/model_best.h5" % fold0_dir
-            if options.data_head is not None:
-                model_file = "%s/train/model%d_best.h5" % (fold0_dir, options.data_head)
-        print("Found %d folds" % options.num_folds)
-        if options.num_folds == 0:
-            exit(1)
+    if args.num_folds is None:
+        args.num_folds = utils.detect_model_folds(args.models_dir)
+        print(f"Found {args.num_folds} folds")
+        if args.num_folds == 0:
+            raise ValueError(f"No models found in {args.models_dir}")
 
     # subset folds
-    fold_index = [fold_i for fold_i in range(options.num_folds)]
+    fold_index = [fold_i for fold_i in range(args.num_folds)]
 
     # subset folds (list)
-    if options.fold_subset_list is not None:
-        fold_index = [int(fold_str) for fold_str in options.fold_subset_list.split(",")]
+    if args.fold_subset_list is not None:
+        fold_index = [int(fold_str) for fold_str in args.fold_subset_list.split(",")]
 
     # extract output subdirectory name
-    gtex_out_dir = options.out_dir
+    gtex_out_dir = args.out_dir
 
     # split SNP stats
-    snp_stats = options.snp_stats.split(",")
+    snp_stats = args.snp_stats.split(",")
+
+    ################################################################
+    # score SNPs
 
     # merge study/tissue variants
-    mpos_vcf_file = "%s/pos_merge.vcf" % options.gtex_vcf_dir
-    mneg_vcf_file = "%s/neg_merge.vcf" % options.gtex_vcf_dir
+    mpos_vcf_file = f"{args.gtex_vcf_dir}/pos_merge.vcf"
+    mneg_vcf_file = f"{args.gtex_vcf_dir}/neg_merge.vcf"
+
+    # embed output in the models directory
+    args.embed = True
+
+    # score negative SNPs
+    args.vcf_file = mneg_vcf_file
+    args.out_dir = f"{gtex_out_dir}/merge_neg"
+    snp_folds(args)
+
+    # score positive SNPs
+    args.vcf_file = mpos_vcf_file
+    args.out_dir = f"{gtex_out_dir}/merge_pos"
+    snp_folds(args)
 
     ################################################################
     # SED

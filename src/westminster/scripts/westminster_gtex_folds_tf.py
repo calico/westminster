@@ -18,19 +18,17 @@ import glob
 import pickle
 import pdb
 import os
+import sys
 
 import h5py
 import numpy as np
 
 import slurm
-import util
-
-from westminster.multi import collect_scores, nonzero_h5
 
 """
-westminster_gtex_folds.py
+westminster_gtexg_folds.py
 
-Benchmark Baskerville model replicates on GTEx eQTL classification task.
+Benchmark Baskerville model replicates on GTEx eQTL coefficient task.
 """
 
 
@@ -41,14 +39,14 @@ def main():
     usage = "usage: %prog [options] <params_file> <data_dir>"
     parser = OptionParser(usage)
 
-    # snp options
-    snp_options = OptionGroup(parser, "hound_snp.py options")
-    parser.add_option(
+    # sed options
+    snp_options = OptionGroup(parser, "hound_snpgene.py options")
+    snp_options.add_option(
         "-c",
-        dest="cluster_snps_pct",
+        dest="cluster_pct",
         default=0,
         type="float",
-        help="Cluster SNPs within a %% of the seq length to make a single ref pred [Default: %default]",
+        help="Cluster genes within a %% of the seq length to make a single ref pred [Default: %default]",
     )
     snp_options.add_option(
         "-f",
@@ -64,6 +62,12 @@ def main():
         help="Use mixed float16 precision [Default: %default]",
     )
     snp_options.add_option(
+        "-g",
+        dest="genes_gtf",
+        default="%s/genes/gencode41/gencode41_basic_nort.gtf" % os.environ["HG38"],
+        help="GTF for gene definition [Default %default]",
+    )
+    snp_options.add_option(
         "--indel_stitch",
         dest="indel_stitch",
         default=False,
@@ -73,7 +77,7 @@ def main():
     snp_options.add_option(
         "-o",
         dest="out_dir",
-        default="gtex",
+        default="sed",
         help="Output directory for tables and plots [Default: %default]",
     )
     snp_options.add_option(
@@ -91,6 +95,13 @@ def main():
         help="Ensemble prediction shifts [Default: %default]",
     )
     snp_options.add_option(
+        "--span",
+        dest="span",
+        default=False,
+        action="store_true",
+        help="Aggregate entire gene span [Default: %default]",
+    )
+    snp_options.add_option(
         "--stats",
         dest="snp_stats",
         default="logSUM",
@@ -104,41 +115,35 @@ def main():
         help="File specifying target indexes and labels in table format",
     )
     snp_options.add_option(
-        "-u",
-        dest="untransform_old",
+        "-u", dest="untransform_old", default=False, action="store_true"
+    )
+    snp_options.add_option(
+        "--gcs",
+        dest="gcs",
         default=False,
         action="store_true",
-        help="Untransform old models [Default: %default]",
+        help="Input and output are in gcs",
+    )
+    snp_options.add_option(
+        "--require_gpu",
+        dest="require_gpu",
+        default=False,
+        action="store_true",
+        help="Only run on GPU",
+    )
+    snp_options.add_option(
+        "--tensorrt",
+        dest="tensorrt",
+        default=False,
+        action="store_true",
+        help="Model type is tensorrt optimized",
     )
     parser.add_option_group(snp_options)
-
-    # classify
-    class_options = OptionGroup(parser, "westminster_classify.py options")
-    class_options.add_option(
-        "--cn",
-        dest="class_name",
-        default=None,
-        help="Classifier name extension [Default: %default]",
-    )
-    class_options.add_option(
-        "--ct",
-        dest="class_targets_file",
-        default=None,
-        help="Targets slice for the classifier stage [Default: %default]",
-    )
-    class_options.add_option(
-        "--msl",
-        dest="msl",
-        default=1,
-        type="int",
-        help="Random forest min_samples_leaf [Default: %default]",
-    )
-    parser.add_option_group(class_options)
 
     # cross-fold
     fold_options = OptionGroup(parser, "cross-fold options")
     fold_options.add_option(
-        "--cross",
+        "--crosses",
         dest="crosses",
         default=1,
         type="int",
@@ -154,7 +159,7 @@ def main():
     fold_options.add_option(
         "-e",
         dest="conda_env",
-        default="tf12",
+        default="tf210",
         help="Anaconda environment [Default: %default]",
     )
     fold_options.add_option(
@@ -171,17 +176,9 @@ def main():
         help="Subset of folds to evaluate (encoded as comma-separated string) [Default:%default]",
     )
     fold_options.add_option(
-        "-g",
         "--gtex",
         dest="gtex_vcf_dir",
-        default="/home/drk/seqnn/data/gtex_fine/susie_pip90r",
-    )
-    fold_options.add_option(
-        "--local",
-        dest="local",
-        default=False,
-        action="store_true",
-        help="Run locally [Default: %default]",
+        default="/home/drk/seqnn/data/gtex_fine/susie_pip90",
     )
     fold_options.add_option(
         "--name",
@@ -258,9 +255,9 @@ def main():
     mneg_vcf_file = "%s/neg_merge.vcf" % options.gtex_vcf_dir
 
     ################################################################
-    # SAD
+    # SED
 
-    # SAD command base
+    # SED command base
     cmd_base = (
         (". %s; " % os.environ["BASKERVILLE_CONDA"])
         if "BASKERVILLE_CONDA" in os.environ
@@ -297,7 +294,7 @@ def main():
             options_pkl.close()
 
             # create base fold command
-            cmd_fold = "%s time hound_snp.py %s %s %s" % (
+            cmd_fold = "%s hound_snpgene.py %s %s %s" % (
                 cmd_base,
                 options_pkl_file,
                 params_file,
@@ -305,8 +302,8 @@ def main():
             )
 
             for pi in range(options.processes):
-                sad_file = "%s/job%d/scores.h5" % (options.out_dir, pi)
-                if not nonzero_h5(sad_file, snp_stats):
+                scores_file = "%s/job%d/scores.h5" % (options.out_dir, pi)
+                if not nonzero_h5(scores_file, snp_stats):
                     cmd_job = "%s %s %d" % (cmd_fold, mneg_vcf_file, pi)
                     j = slurm.Job(
                         cmd_job,
@@ -316,7 +313,7 @@ def main():
                         "%s/job%d.sb" % (options.out_dir, pi),
                         queue=options.queue,
                         gpu=1,
-                        cpu=4,
+                        cpu=2,
                         mem=30000,
                         time="7-0:0:0",
                     )
@@ -334,7 +331,7 @@ def main():
             options_pkl.close()
 
             # create base fold command
-            cmd_fold = "%s time hound_snp.py %s %s %s" % (
+            cmd_fold = "%s hound_snpgene.py %s %s %s" % (
                 cmd_base,
                 options_pkl_file,
                 params_file,
@@ -342,8 +339,8 @@ def main():
             )
 
             for pi in range(options.processes):
-                sad_file = "%s/job%d/scores.h5" % (options.out_dir, pi)
-                if not nonzero_h5(sad_file, snp_stats):
+                scores_file = "%s/job%d/scores.h5" % (options.out_dir, pi)
+                if not nonzero_h5(scores_file, snp_stats):
                     cmd_job = "%s %s %d" % (cmd_fold, mpos_vcf_file, pi)
                     j = slurm.Job(
                         cmd_job,
@@ -353,7 +350,7 @@ def main():
                         "%s/job%d.sb" % (options.out_dir, pi),
                         queue=options.queue,
                         gpu=1,
-                        cpu=4,
+                        cpu=2,
                         mem=30000,
                         time="7-0:0:0",
                     )
@@ -362,22 +359,6 @@ def main():
     slurm.multi_run(
         jobs, max_proc=options.max_proc, verbose=True, launch_sleep=10, update_sleep=60
     )
-
-    #######################################################
-    # verify
-
-    for ci in range(options.crosses):
-        for fi in fold_index:
-            it_out_dir = f"{exp_dir}/f{fi}c{ci}/{gtex_out_dir}"
-
-            for pi in range(options.processes):
-                neg_scores_file = f"{it_out_dir}/merge_neg/job{pi}/scores.h5"
-                if not nonzero_h5(neg_scores_file, snp_stats):
-                    raise RuntimeError(f"SNP scoring job failed: {neg_scores_file}")
-
-                pos_scores_file = f"{it_out_dir}/merge_pos/job{pi}/scores.h5"
-                if not nonzero_h5(pos_scores_file, snp_stats):
-                    raise RuntimeError(f"SNP scoring job failed: {pos_scores_file}")
 
     #######################################################
     # collect output
@@ -389,12 +370,14 @@ def main():
             # collect negatives
             neg_out_dir = "%s/merge_neg" % it_out_dir
             if not os.path.isfile("%s/scores.h5" % neg_out_dir):
-                collect_scores(neg_out_dir, options.processes)
+                print(f"Collecting {neg_out_dir}")
+                collect_scores(neg_out_dir, options.processes, "scores.h5")
 
             # collect positives
             pos_out_dir = "%s/merge_pos" % it_out_dir
             if not os.path.isfile("%s/scores.h5" % pos_out_dir):
-                collect_scores(pos_out_dir, options.processes)
+                print(f"Collecting {pos_out_dir}")
+                collect_scores(pos_out_dir, options.processes, "scores.h5")
 
     ################################################################
     # split study/tissue variants
@@ -402,13 +385,13 @@ def main():
     for ci in range(options.crosses):
         for fi in fold_index:
             it_out_dir = "%s/f%dc%d/%s" % (exp_dir, fi, ci, gtex_out_dir)
-            print(it_out_dir)
+            print(f"Splitting {it_out_dir}")
 
             # split positives
-            split_sad(it_out_dir, "pos", options.gtex_vcf_dir, snp_stats)
+            split_scores(it_out_dir, "pos", options.gtex_vcf_dir, snp_stats)
 
             # split negatives
-            split_sad(it_out_dir, "neg", options.gtex_vcf_dir, snp_stats)
+            split_scores(it_out_dir, "neg", options.gtex_vcf_dir, snp_stats)
 
     ################################################################
     # ensemble
@@ -422,235 +405,228 @@ def main():
         os.mkdir(gtex_dir)
 
     for gtex_pos_vcf in glob.glob("%s/*_pos.vcf" % options.gtex_vcf_dir):
+        print(f"Ensembling {gtex_pos_vcf}")
         gtex_neg_vcf = gtex_pos_vcf.replace("_pos.", "_neg.")
         pos_base = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0]
         neg_base = os.path.splitext(os.path.split(gtex_neg_vcf)[1])[0]
 
-        # collect SAD files
-        sad_pos_files = []
-        sad_neg_files = []
+        # collect score files
+        score_pos_files = []
+        score_neg_files = []
         for ci in range(options.crosses):
             for fi in fold_index:
                 it_dir = "%s/f%dc%d" % (exp_dir, fi, ci)
                 it_out_dir = "%s/%s" % (it_dir, gtex_out_dir)
 
-                sad_pos_file = "%s/%s/scores.h5" % (it_out_dir, pos_base)
-                sad_pos_files.append(sad_pos_file)
+                score_pos_file = "%s/%s/scores.h5" % (it_out_dir, pos_base)
+                score_pos_files.append(score_pos_file)
 
-                sad_neg_file = "%s/%s/scores.h5" % (it_out_dir, neg_base)
-                sad_neg_files.append(sad_neg_file)
+                score_neg_file = "%s/%s/scores.h5" % (it_out_dir, neg_base)
+                score_neg_files.append(score_neg_file)
 
         # ensemble
         ens_pos_dir = "%s/%s" % (gtex_dir, pos_base)
         os.makedirs(ens_pos_dir, exist_ok=True)
         ens_pos_file = "%s/scores.h5" % (ens_pos_dir)
         if not os.path.isfile(ens_pos_file):
-            ensemble_sad_h5(ens_pos_file, sad_pos_files)
+            ensemble_h5(ens_pos_file, score_pos_files, snp_stats)
 
         ens_neg_dir = "%s/%s" % (gtex_dir, neg_base)
         os.makedirs(ens_neg_dir, exist_ok=True)
         ens_neg_file = "%s/scores.h5" % (ens_neg_dir)
         if not os.path.isfile(ens_neg_file):
-            ensemble_sad_h5(ens_neg_file, sad_neg_files)
-
-    ################################################################
-    # fit classifiers
-
-    # SNPs (random forest)
-    # cmd_base = "westminster_classify.py -f 8 -i 20 -n 512 -s"
-    # SNPs (xgboost)
-    cmd_base = "westminster_classify.py -f 8 -i 20 -n 96 -s -x"
-    # indels
-    # cmd_base = 'westminster_classify.py -f 6 -i 64 -s'
-    cmd_base += " --msl %d" % options.msl
-
-    if options.class_targets_file is not None:
-        cmd_base += " -t %s" % options.class_targets_file
-
-    jobs = []
-    for ci in range(options.crosses):
-        for fi in fold_index:
-            it_dir = "%s/f%dc%d" % (exp_dir, fi, ci)
-            it_out_dir = "%s/%s" % (it_dir, gtex_out_dir)
-
-            for gtex_pos_vcf in glob.glob("%s/*_pos.vcf" % options.gtex_vcf_dir):
-                tissue = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0][:-4]
-                sad_pos = "%s/%s_pos/scores.h5" % (it_out_dir, tissue)
-                sad_neg = "%s/%s_neg/scores.h5" % (it_out_dir, tissue)
-                for snp_stat in snp_stats:
-                    class_out_dir = "%s/%s_class-%s" % (it_out_dir, tissue, snp_stat)
-                    if options.class_name is not None:
-                        class_out_dir += "-%s" % options.class_name
-                    if not os.path.isfile("%s/stats.txt" % class_out_dir):
-                        cmd_class = "%s -o %s --stat %s" % (
-                            cmd_base,
-                            class_out_dir,
-                            snp_stat,
-                        )
-                        cmd_class += " %s %s" % (sad_pos, sad_neg)
-                        if options.local:
-                            jobs.append(cmd_class)
-                        else:
-                            j = slurm.Job(
-                                cmd_class,
-                                tissue,
-                                "%s.out" % class_out_dir,
-                                "%s.err" % class_out_dir,
-                                queue="standard",
-                                cpu=2,
-                                mem=22000,
-                                time="1-0:0:0",
-                            )
-                            jobs.append(j)
-
-    # ensemble
-    for gtex_pos_vcf in glob.glob("%s/*_pos.vcf" % options.gtex_vcf_dir):
-        tissue = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0][:-4]
-        sad_pos = "%s/%s_pos/scores.h5" % (gtex_dir, tissue)
-        sad_neg = "%s/%s_neg/scores.h5" % (gtex_dir, tissue)
-        for snp_stat in snp_stats:
-            class_out_dir = "%s/%s_class-%s" % (gtex_dir, tissue, snp_stat)
-            if options.class_name is not None:
-                class_out_dir += "-%s" % options.class_name
-            if not os.path.isfile("%s/stats.txt" % class_out_dir):
-                cmd_class = "%s -o %s --stat %s" % (cmd_base, class_out_dir, snp_stat)
-                cmd_class += " %s %s" % (sad_pos, sad_neg)
-                if options.local:
-                    jobs.append(cmd_class)
-                else:
-                    j = slurm.Job(
-                        cmd_class,
-                        tissue,
-                        "%s.out" % class_out_dir,
-                        "%s.err" % class_out_dir,
-                        queue="standard",
-                        cpu=2,
-                        mem=22000,
-                        time="1-0:0:0",
-                    )
-                    jobs.append(j)
-
-    if options.local:
-        util.exec_par(jobs, 3, verbose=True)
-    else:
-        slurm.multi_run(jobs, verbose=True)
+            ensemble_h5(ens_neg_file, score_neg_files, snp_stats)
 
     ################################################################
     # coefficient analysis
 
-    cmd_base = f"westminster_gtex_coef.py -g {options.gtex_vcf_dir}"
+    cmd_base = "westminster_gtexg_coef.py -g %s" % options.gtex_vcf_dir
 
     jobs = []
     for ci in range(options.crosses):
         for fi in fold_index:
             it_dir = "%s/f%dc%d" % (exp_dir, fi, ci)
             it_out_dir = "%s/%s" % (it_dir, gtex_out_dir)
+
             for snp_stat in snp_stats:
                 coef_out_dir = f"{it_out_dir}/coef-{snp_stat}"
-
-                cmd_coef = cmd_base
-                cmd_coef += f" -o {coef_out_dir}"
-                cmd_coef += f" -s {snp_stat}"
-                cmd_coef += f" {it_out_dir}"
-                if options.local:
-                    jobs.append(cmd_coef)
-                else:
-                    j = slurm.Job(
-                        cmd_coef,
-                        "coef",
-                        f"{coef_out_dir}.out",
-                        f"{coef_out_dir}.err",
-                        queue="standard",
-                        cpu=2,
-                        mem=22000,
-                        time="12:0:0",
-                    )
-                    jobs.append(j)
+                cmd_coef = f"{cmd_base} -o {coef_out_dir} -s {snp_stat} {it_out_dir}"
+                j = slurm.Job(
+                    cmd_coef,
+                    "coef",
+                    f"{coef_out_dir}.out",
+                    f"{coef_out_dir}.err",
+                    queue="standard",
+                    cpu=2,
+                    mem=22000,
+                    time="12:0:0",
+                )
+                jobs.append(j)
 
     # ensemble
     it_out_dir = f"{exp_dir}/ensemble/{gtex_out_dir}"
     for snp_stat in snp_stats:
         coef_out_dir = f"{it_out_dir}/coef-{snp_stat}"
+        cmd_coef = f"{cmd_base} -o {coef_out_dir} -s {snp_stat} {it_out_dir}"
+        j = slurm.Job(
+            cmd_coef,
+            "coef",
+            f"{coef_out_dir}.out",
+            f"{coef_out_dir}.err",
+            queue="standard",
+            cpu=2,
+            mem=22000,
+            time="12:0:0",
+        )
+        jobs.append(j)
 
-        cmd_coef = cmd_base
-        cmd_coef += f" -o {coef_out_dir}"
-        cmd_coef += f" -s {snp_stat}"
-        cmd_coef += f" {it_out_dir}"
-
-        if options.local:
-            jobs.append(cmd_coef)
-        else:
-            j = slurm.Job(
-                cmd_coef,
-                "coef",
-                f"{coef_out_dir}.out",
-                f"{coef_out_dir}.err",
-                queue="standard",
-                cpu=2,
-                mem=22000,
-                time="12:0:0",
-            )
-            jobs.append(j)
-
-    if options.local:
-        util.exec_par(jobs, 3, verbose=True)
-    else:
-        slurm.multi_run(jobs, verbose=True)
+    slurm.multi_run(jobs, verbose=True)
 
 
-def ensemble_sad_h5(ensemble_h5_file: str, scores_files):
-    """Ensemble SAD scores from multiple files into a single file.
+def collect_scores(out_dir: str, num_jobs: int, h5f_name: str = "scores.h5"):
+    """Collect parallel SAD jobs' output into one HDF5.
+
+    Args:
+      out_dir (str): Output directory.
+      num_jobs (int): Number of jobs to combine results from.
+    """
+    # count variants
+    num_variants = 0
+    for pi in range(num_jobs):
+        # open job
+        job_h5_file = "%s/job%d/%s" % (out_dir, pi, h5f_name)
+        with h5py.File(job_h5_file, "r") as job_h5_open:
+            num_variants += len(job_h5_open["snp"])
+
+    final_dict = {}
+
+    for pi in range(num_jobs):
+        # open job
+        job_h5_file = "%s/job%d/%s" % (out_dir, pi, h5f_name)
+        with h5py.File(job_h5_file, "r") as job_h5_open:
+            for key in job_h5_open.keys():
+                if key in ["target_ids", "target_labels"]:
+                    final_dict[key] = job_h5_open[key][:]
+                elif key in ["snp", "chr", "pos", "ref_allele", "alt_allele", "gene"]:
+                    final_dict.setdefault(key, []).append(job_h5_open[key][:])
+                elif isinstance(job_h5_open[key], h5py.Group):
+                    snp_stat = key
+                    if snp_stat not in final_dict:
+                        final_dict[snp_stat] = {}
+                    for snp in job_h5_open[snp_stat].keys():
+                        final_dict[snp_stat][snp] = {}
+                        for gene in job_h5_open[snp_stat][snp].keys():
+                            final_dict[snp_stat][snp][gene] = job_h5_open[snp_stat][
+                                snp
+                            ][gene][:]
+                else:
+                    print(f"During collection, unknown key {key}")
+
+    # initialize final h5
+    final_h5_file = "%s/%s" % (out_dir, h5f_name)
+    with h5py.File(final_h5_file, "w") as final_h5_open:
+        for key in final_dict.keys():
+            if key in ["target_ids", "target_labels"]:
+                final_h5_open.create_dataset(key, data=final_dict[key])
+            elif key in ["snp", "chr", "pos", "ref_allele", "alt_allele", "gene"]:
+                fdv = np.concatenate(final_dict[key])
+                final_h5_open.create_dataset(key, data=fdv)
+
+            else:
+                snp_stat = key
+                final_h5_open.create_group(snp_stat)
+                for snp in final_dict[snp_stat].keys():
+                    final_h5_open[snp_stat].create_group(snp)
+                    for gene in final_dict[snp_stat][snp].keys():
+                        final_h5_open[snp_stat][snp].create_dataset(
+                            gene, data=final_dict[snp_stat][snp][gene]
+                        )
+
+
+def ensemble_h5(ensemble_h5_file: str, scores_files: list, snp_stats: list):
+    """Ensemble scores from multiple files into a single file.
 
     Args:
       ensemble_h5_file (str): ensemble score HDF5.
       scores_files ([str]): list of replicate score HDFs.
+      snp_stats ([str]): SNP stats to average over folds.
     """
     # open ensemble
     ensemble_h5 = h5py.File(ensemble_h5_file, "w")
 
-    # transfer base
-    base_keys = [
-        "alt_allele",
-        "chr",
-        "pos",
-        "ref_allele",
-        "snp",
-        "target_ids",
-        "target_labels",
-    ]
-    snp_stats = []
-    sad_shapes = []
-    scores0_h5 = h5py.File(scores_files[0], "r")
-    for key in scores0_h5.keys():
-        if key in base_keys:
-            ensemble_h5.create_dataset(key, data=scores0_h5[key])
-        else:
-            snp_stats.append(key)
-            sad_shapes.append(scores0_h5[key].shape)
-    scores0_h5.close()
+    with h5py.File(scores_files[0], "r") as scores0_h5:
+        for key in scores0_h5.keys():
+            if key in snp_stats:
+                ensemble_h5.create_group(key)
+            else:
+                ensemble_h5.create_dataset(key, data=scores0_h5[key])
 
     # average stats
     num_folds = len(scores_files)
-    for si, snp_stat in enumerate(snp_stats):
-        # initialize ensemble array
-        sad_values = np.zeros(shape=sad_shapes[si], dtype="float32")
-
-        # read and add folds
+    for snp_stat in snp_stats:
+        # sum scores across folds
+        snpgene_scores = {}
         for scores_file in scores_files:
             with h5py.File(scores_file, "r") as scores_h5:
-                sad_values += scores_h5[snp_stat][:].astype("float32")
+                for snp in scores_h5[snp_stat].keys():
+                    if snp not in snpgene_scores:
+                        snpgene_scores[snp] = {}
+                    for gene in scores_h5[snp_stat][snp].keys():
+                        if gene not in snpgene_scores[snp]:
+                            snpgene_scores[snp][gene] = scores_h5[snp_stat][snp][gene][
+                                :
+                            ].astype("float32")
+                        else:
+                            snpgene_scores[snp][gene] += scores_h5[snp_stat][snp][gene][
+                                :
+                            ].astype("float32")
 
-        # normalize and downcast
-        sad_values /= num_folds
-        sad_values = sad_values.astype("float16")
-
-        # save
-        ensemble_h5.create_dataset(snp_stat, data=sad_values)
+        # write average score
+        for snp in snpgene_scores:
+            ensemble_h5[snp_stat].create_group(snp)
+            for gene in snpgene_scores[snp]:
+                ensemble_score = snpgene_scores[snp][gene] / num_folds
+                ensemble_h5[snp_stat][snp].create_dataset(
+                    gene, data=ensemble_score.astype("float16")
+                )
 
     ensemble_h5.close()
 
 
-def split_sad(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
+def nonzero_h5(h5_file: str, stat_keys):
+    """Verify the HDF5 exists, and there are nonzero values
+      for each stat key given.
+
+    Args:
+      h5_file (str): HDF5 file name.
+      stat_keys ([str]): List of SNP stat keys.
+    """
+    if os.path.isfile(h5_file):
+        try:
+            with h5py.File(h5_file, "r") as h5_open:
+                snps_all = set([snp.decode("UTF-8") for snp in h5_open["snp"]])
+                for sk in stat_keys:
+                    snps_stat = set(h5_open[sk].keys())
+                    snps_ovl = snps_all & snps_stat
+                    if len(snps_ovl) == 0:
+                        print(f"{h5_file}: {sk} empty.")
+                        return False
+                    else:
+                        for snp in list(snps_ovl)[:5]:
+                            for gene in h5_open[sk][snp].keys():
+                                score = h5_open[sk][snp][gene][:]
+                                if score.var(dtype="float64") == 0:
+                                    print(f"{h5_file}: {sk} {snp} {gene} zero var.")
+                                    return False
+                return True
+        except:
+            print(f"{h5_file}: error", sys.exc_info()[0])
+            return False
+    else:
+        return False
+
+
+def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
     """Split merged VCF predictions in HDF5 into tissue-specific
     predictions in HDF5.
 
@@ -658,19 +634,14 @@ def split_sad(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
       it_out_dir (str): output directory for iteration.
       posneg (str): 'pos' or 'neg'.
       vcf_dir (str): directory containing tissue-specific VCFs.
-      snp_stats ([str]]): list of SAD stats.
+      snp_stats ([str]]): list of SED stats.
     """
     merge_h5_file = "%s/merge_%s/scores.h5" % (it_out_dir, posneg)
     merge_h5 = h5py.File(merge_h5_file, "r")
 
-    # read merged data
-    snps = [snp.decode("UTF-8") for snp in merge_h5["snp"]]
-    merge_scores = {}
-    for ss in snp_stats:
-        merge_scores[ss] = merge_h5[ss][:]
-
-    # hash snp indexes
-    snp_si = dict(zip(snps, np.arange(len(snps))))
+    # hash scored SNPs
+    all_snps = set([snp.decode("UTF-8") for snp in merge_h5["snp"]])
+    scored_snps = set([snp for snp in merge_h5[snp_stats[0]].keys()])
 
     # for each tissue VCF
     vcf_glob = "%s/*_%s.vcf" % (vcf_dir, posneg)
@@ -680,58 +651,64 @@ def split_sad(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
         tissue_label = tissue_label.replace("_neg.vcf", "")
 
         # initialize HDF5 arrays
-        sad_snp = []
-        sad_chr = []
-        sad_pos = []
-        sad_ref = []
-        sad_alt = []
-        sad_scores = {}
-        for ss in snp_stats:
-            sad_scores[ss] = []
+        snpg_snp = []
+        snpg_chr = []
+        snpg_pos = []
+        snpg_ref = []
+        snpg_alt = []
 
         # fill HDF5 arrays with ordered SNPs
         for line in open(tissue_vcf_file):
             if not line.startswith("#"):
                 a = line.split()
                 chrm, pos, snp, ref, alt = a[:5]
-                sad_snp.append(snp)
-                sad_chr.append(chrm)
-                sad_pos.append(int(pos))
-                sad_ref.append(ref)
-                sad_alt.append(alt)
 
-                for ss in snp_stats:
-                    si = snp_si[snp]
-                    sad_scores[ss].append(merge_scores[ss][si])
+                # SNPs w/o genes disappear
+                if snp in all_snps:
+                    snpg_snp.append(snp)
+                    snpg_chr.append(chrm)
+                    snpg_pos.append(int(pos))
+                    snpg_ref.append(ref)
+                    snpg_alt.append(alt)
 
         # write tissue HDF5
         tissue_dir = "%s/%s_%s" % (it_out_dir, tissue_label, posneg)
         os.makedirs(tissue_dir, exist_ok=True)
         with h5py.File("%s/scores.h5" % tissue_dir, "w") as tissue_h5:
             # write SNPs
-            tissue_h5.create_dataset("snp", data=np.array(sad_snp, "S"))
+            tissue_h5.create_dataset("snp", data=np.array(snpg_snp, "S"))
 
-            # write SNP chr
-            tissue_h5.create_dataset("chr", data=np.array(sad_chr, "S"))
+            # write chr
+            tissue_h5.create_dataset("chr", data=np.array(snpg_chr, "S"))
 
             # write SNP pos
-            tissue_h5.create_dataset("pos", data=np.array(sad_pos, dtype="uint32"))
+            tissue_h5.create_dataset("pos", data=np.array(snpg_pos, dtype="uint32"))
 
             # write ref allele
-            tissue_h5.create_dataset("ref_allele", data=np.array(sad_ref, dtype="S"))
+            tissue_h5.create_dataset("ref_allele", data=np.array(snpg_ref, dtype="S"))
 
             # write alt allele
-            tissue_h5.create_dataset("alt_allele", data=np.array(sad_alt, dtype="S"))
+            tissue_h5.create_dataset("alt_allele", data=np.array(snpg_alt, dtype="S"))
 
             # write targets
             tissue_h5.create_dataset("target_ids", data=merge_h5["target_ids"])
             tissue_h5.create_dataset("target_labels", data=merge_h5["target_labels"])
 
-            # write sed stats
+            # write SNP stats
+            genes = set()
             for ss in snp_stats:
-                tissue_h5.create_dataset(
-                    ss, data=np.array(sad_scores[ss], dtype="float16")
-                )
+                tissue_h5.create_group(ss)
+                for snp in snpg_snp:
+                    if snp in scored_snps:
+                        tissue_h5[ss].create_group(snp)
+                        for gene in merge_h5[ss][snp].keys():
+                            tissue_h5[ss][snp].create_dataset(
+                                gene, data=merge_h5[ss][snp][gene][:]
+                            )
+                            genes.add(gene)
+
+            # write genes
+            tissue_h5.create_dataset("gene", data=np.array(sorted(genes), "S"))
 
     merge_h5.close()
 
