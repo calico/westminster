@@ -262,7 +262,7 @@ def main():
     cmd_base = "westminster_classify.py -f 10 -i 10 -x"
     cmd_base += f" -l {args.learning_rate}"
     cmd_base += f" --md {args.max_depth}"
-    cmd_base += f" -n {args.n_estimators}"
+    cmd_base += f" --ne {args.n_estimators}"
 
     if args.class_targets_file is not None:
         cmd_base += f" -t {args.class_targets_file}"
