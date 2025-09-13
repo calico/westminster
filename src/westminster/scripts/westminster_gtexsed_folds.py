@@ -187,11 +187,11 @@ def main():
     # prep work
 
     # count folds
-    if args.num_folds is None:
-        args.num_folds = utils.detect_model_folds(args.models_dir)
-        print(f"Found {args.num_folds} folds")
-        if args.num_folds == 0:
-            raise ValueError(f"No models found in {args.models_dir}")
+    if options.num_folds is None:
+        options.num_folds = utils.detect_model_folds(exp_dir)
+        print(f"Found {options.num_folds} folds")
+        if options.num_folds == 0:
+            raise ValueError(f"No models found in {exp_dir}")
 
     # subset folds
     fold_index = [fold_i for fold_i in range(options.num_folds)]
