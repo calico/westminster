@@ -99,12 +99,16 @@ def main():
             gtex_scores_file = f"{args.gtex_dir}/{tissue}_pos/scores.h5"
             try:
                 eqtl_df = add_scores(
-                    gtex_scores_file, keyword, eqtl_df, args.snp_stat, verbose=args.verbose
+                    gtex_scores_file,
+                    keyword,
+                    eqtl_df,
+                    args.snp_stat,
+                    verbose=args.verbose,
                 )
             except ValueError:
                 print(f"Skipping {tissue} due to missing targets.", file=sys.stderr)
                 continue
- 
+
             # compute AUROCs
             sign_auroc = roc_auc_score(eqtl_df.coef > 0, eqtl_df.score)
 

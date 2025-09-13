@@ -509,12 +509,18 @@ def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
 
             out_h5_path = f"{tissue_dir}/scores.h5"
             with h5py.File(out_h5_path, "w") as out_h5:
-                out_h5.create_dataset("progress_status", data="completed".encode("utf-8"))
+                out_h5.create_dataset(
+                    "progress_status", data="completed".encode("utf-8")
+                )
                 out_h5.create_dataset("snp", data=np.array(tissue_snps, dtype="S"))
                 out_h5.create_dataset("chr", data=np.array(tissue_chr, dtype="S"))
                 out_h5.create_dataset("pos", data=np.array(tissue_pos, dtype="uint32"))
-                out_h5.create_dataset("ref_allele", data=np.array(tissue_ref, dtype="S"))
-                out_h5.create_dataset("alt_allele", data=np.array(tissue_alt, dtype="S"))
+                out_h5.create_dataset(
+                    "ref_allele", data=np.array(tissue_ref, dtype="S")
+                )
+                out_h5.create_dataset(
+                    "alt_allele", data=np.array(tissue_alt, dtype="S")
+                )
 
                 if gene_specific:
                     # order rows grouped by tissue SNP order
@@ -523,23 +529,39 @@ def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
                         ordered_rows.extend(sorted(snp_to_rows.get(snp_id, [])))
                     ordered_rows = np.array(ordered_rows, dtype=int)
 
-                    used_gene_indices = sorted({int(gene_idx_map[r]) for r in ordered_rows})
+                    used_gene_indices = sorted(
+                        {int(gene_idx_map[r]) for r in ordered_rows}
+                    )
                     oldgene_to_new = {g: i for i, g in enumerate(used_gene_indices)}
                     new_gene_ids = [gene_ids[g] for g in used_gene_indices]
-                    out_h5.create_dataset("gene_ids", data=np.array(new_gene_ids, dtype="S"))
+                    out_h5.create_dataset(
+                        "gene_ids", data=np.array(new_gene_ids, dtype="S")
+                    )
 
-                    oldsnp_to_new = {snp_index[snp_id]: i for i, snp_id in enumerate(tissue_snps)}
-                    new_snp_idx = np.array([oldsnp_to_new[int(snp_idx_map[r])] for r in ordered_rows], dtype="int64")
-                    new_gene_idx = np.array([oldgene_to_new[int(gene_idx_map[r])] for r in ordered_rows], dtype="int64")
+                    oldsnp_to_new = {
+                        snp_index[snp_id]: i for i, snp_id in enumerate(tissue_snps)
+                    }
+                    new_snp_idx = np.array(
+                        [oldsnp_to_new[int(snp_idx_map[r])] for r in ordered_rows],
+                        dtype="int64",
+                    )
+                    new_gene_idx = np.array(
+                        [oldgene_to_new[int(gene_idx_map[r])] for r in ordered_rows],
+                        dtype="int64",
+                    )
                     out_h5.create_dataset("snp_idx", data=new_snp_idx)
                     out_h5.create_dataset("gene_idx", data=new_gene_idx)
 
                     for ss in snp_stats:
-                        out_h5.create_dataset(ss, data=merge_scores[ss][ordered_rows].astype("float16"))
+                        out_h5.create_dataset(
+                            ss, data=merge_scores[ss][ordered_rows].astype("float16")
+                        )
                 else:
                     merged_indices = [snp_index[s] for s in tissue_snps]
                     for ss in snp_stats:
-                        out_h5.create_dataset(ss, data=merge_scores[ss][merged_indices].astype("float16"))
+                        out_h5.create_dataset(
+                            ss, data=merge_scores[ss][merged_indices].astype("float16")
+                        )
 
 
 ################################################################################
