@@ -18,6 +18,7 @@ import os
 
 import slurm
 
+from baskerville_torch import utils
 from baskerville_torch.scripts.hound_snp_folds import snp_folds
 
 """
@@ -64,6 +65,13 @@ def main():
         default=False,
         action="store_true",
         help="Stitch indel compensation shifts",
+    )
+    snp_group.add_argument(
+        "-n",
+        "--norm",
+        dest="norm_subdir",
+        default=None,
+        help="Model directory subdirectory containing normalization HDF5 files for each fold",
     )
     snp_group.add_argument(
         "-o",
@@ -121,18 +129,18 @@ def main():
         help="XGBoost learning rate",
     )
     class_group.add_argument(
-        "-n",
-        dest="n_estimators",
-        default=100,
-        type=int,
-        help="XGBoost n_estimators",
-    )
-    class_group.add_argument(
         "--md",
         dest="max_depth",
         default=4,
         type=int,
         help="XGBoost max_depth",
+    )
+    class_group.add_argument(
+        "--ne",
+        dest="n_estimators",
+        default=100,
+        type=int,
+        help="XGBoost n_estimators",
     )
 
     # cross-fold options
@@ -217,16 +225,10 @@ def main():
 
     # count folds
     if args.num_folds is None:
-        args.num_folds = 0
-        fold0_dir = f"{args.models_dir}/f{args.num_folds}c0"
-        model_file = f"{fold0_dir}/train/model_best.pth"
-        while os.path.isfile(model_file):
-            args.num_folds += 1
-            fold0_dir = f"{args.models_dir}/f{args.num_folds}c0"
-            model_file = f"{fold0_dir}/train/model_best.pth"
+        args.num_folds = utils.detect_model_folds(args.models_dir)
         print(f"Found {args.num_folds} folds")
         if args.num_folds == 0:
-            exit(1)
+            raise ValueError(f"No models found in {args.models_dir}")
 
     # extract output subdirectory name
     gnomad_out_dir = args.out_dir
@@ -260,10 +262,10 @@ def main():
     cmd_base = "westminster_classify.py -f 10 -i 10 -x"
     cmd_base += f" -l {args.learning_rate}"
     cmd_base += f" --md {args.max_depth}"
-    cmd_base += f" -n {args.n_estimators}"
+    cmd_base += f" --ne {args.n_estimators}"
 
     if args.class_targets_file is not None:
-        cmd_base += " -t %s" % args.class_targets_file
+        cmd_base += f" -t {args.class_targets_file}"
 
     classify_stats = snp_stats
     if len(classify_stats) > 1:

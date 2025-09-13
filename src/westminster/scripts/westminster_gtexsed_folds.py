@@ -188,20 +188,10 @@ def main():
 
     # count folds
     if options.num_folds is None:
-        options.num_folds = 0
-        fold0_dir = "%s/f%dc0" % (exp_dir, options.num_folds)
-        model_file = "%s/train/model_best.h5" % fold0_dir
-        if options.data_head is not None:
-            model_file = "%s/train/model%d_best.h5" % (fold0_dir, options.data_head)
-        while os.path.isfile(model_file):
-            options.num_folds += 1
-            fold0_dir = "%s/f%dc0" % (exp_dir, options.num_folds)
-            model_file = "%s/train/model_best.h5" % fold0_dir
-            if options.data_head is not None:
-                model_file = "%s/train/model%d_best.h5" % (fold0_dir, options.data_head)
-        print("Found %d folds" % options.num_folds)
+        options.num_folds = utils.detect_model_folds(exp_dir)
+        print(f"Found {options.num_folds} folds")
         if options.num_folds == 0:
-            exit(1)
+            raise ValueError(f"No models found in {exp_dir}")
 
     # subset folds
     fold_index = [fold_i for fold_i in range(options.num_folds)]
