@@ -211,13 +211,14 @@ def main():
                     if "BASKERVILLE_CONDA" in os.environ
                     else ""
                 )
-                cmd += f"conda activate {options.conda_env};"
+                cmd += f" echo $HOSTNAME;"
+                cmd += f" conda activate {options.conda_env};"
                 cmd += f" hound_eval_genes.py"
                 cmd += f" --head {options.head_i}"
                 cmd += f" -o {eval_dir}"
                 cmd += f" --seq_step {options.seq_step}"
                 if options.pseudo_qtl is not None:
-                    cmd += " --pseudo_qtl %.2f" % options.pseudo_qtl
+                    cmd += f" --pseudo_qtl {options.pseudo_qtl:.2f}"
                 if options.rc:
                     cmd += " --rc"
                 if options.save_span:
