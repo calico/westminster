@@ -289,26 +289,24 @@ def read_scores(
     targets_file = gtex_scores_file.replace("scores.h5", "targets.txt")
     targets_df = pd.read_csv(targets_file, sep="\t", index_col=0)
 
+    # determine matching GTEx targets
+    target_ids = targets_df.identifier.values
+    target_labels = targets_df.description.values
+
+    # match tissue targets
+    match_tis = []
+    for ti in range(len(target_ids)):
+        if target_ids[ti].find("GTEX") != -1 and target_labels[ti].find(keyword) != -1:
+            if not keyword == "blood" or target_labels[ti].find("vessel") == -1:
+                if verbose:
+                    print(ti, target_ids[ti], target_labels[ti])
+                match_tis.append(ti)
+    match_tis = np.array(match_tis)
+
     with h5py.File(gtex_scores_file, "r") as gtex_scores_h5:
         score_ref = np.array(
             [ref.decode("UTF-8") for ref in gtex_scores_h5["ref_allele"]]
         )
-
-        # determine matching GTEx targets
-        target_ids = targets_df.identifier.values
-        target_labels = targets_df.description.values
-
-        match_tis = []
-        for ti in range(len(target_ids)):
-            if (
-                target_ids[ti].find("GTEX") != -1
-                and target_labels[ti].find(keyword) != -1
-            ):
-                if not keyword == "blood" or target_labels[ti].find("vessel") == -1:
-                    if verbose:
-                        print(ti, target_ids[ti], target_labels[ti])
-                    match_tis.append(ti)
-        match_tis = np.array(match_tis)
 
         # mean across targets
         variant_scores = gtex_scores_h5[score_key][..., match_tis].mean(
