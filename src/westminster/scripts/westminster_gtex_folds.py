@@ -25,6 +25,7 @@ import slurm
 import util
 
 # from westminster.multi import collect_scores, nonzero_h5
+from baskerville_torch import utils
 from baskerville_torch.scripts.hound_snp_folds import snp_folds
 
 """
@@ -504,8 +505,7 @@ def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
 
             tissue_dir = f"{it_out_dir}/{tissue_label}_{posneg}"
             os.makedirs(tissue_dir, exist_ok=True)
-            if os.path.exists(targets_file):
-                shutil.copyfile(targets_file, f"{tissue_dir}/targets.txt")
+            shutil.copyfile(targets_file, f"{tissue_dir}/targets.txt")
 
             out_h5_path = f"{tissue_dir}/scores.h5"
             with h5py.File(out_h5_path, "w") as out_h5:
@@ -553,15 +553,11 @@ def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
                     out_h5.create_dataset("gene_idx", data=new_gene_idx)
 
                     for ss in snp_stats:
-                        out_h5.create_dataset(
-                            ss, data=merge_scores[ss][ordered_rows].astype("float16")
-                        )
+                        out_h5.create_dataset(ss, data=merge_scores[ss][ordered_rows])
                 else:
                     merged_indices = [snp_index[s] for s in tissue_snps]
                     for ss in snp_stats:
-                        out_h5.create_dataset(
-                            ss, data=merge_scores[ss][merged_indices].astype("float16")
-                        )
+                        out_h5.create_dataset(ss, data=merge_scores[ss][merged_indices])
 
 
 ################################################################################
