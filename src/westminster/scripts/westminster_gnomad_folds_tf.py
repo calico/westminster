@@ -435,7 +435,7 @@ def main():
 
     jobs = []
     for ci in range(options.crosses):
-        for fi in range(1, options.num_folds):
+        for fi in range(options.num_folds):
             it_dir = f"{exp_dir}/f{fi}c{ci}"
             it_out_dir = f"{it_dir}/{gnomad_out_dir}"
 
