@@ -2,6 +2,7 @@
 from optparse import OptionParser
 import joblib
 import os
+import json
 from tqdm import tqdm
 from typing import List
 
@@ -183,7 +184,7 @@ def main():
 
         # save preds
         if options.save_preds:
-            np.save("%s/preds.npy" % options.out_dir, X)
+            np.save(f"{options.out_dir}/preds.npy", X)
     else:
         if options.xgboost:
             aurocs, fpr_folds, tpr_folds, fpr_mean, tpr_mean, preds = folds_xgboost(
@@ -209,7 +210,7 @@ def main():
 
         # save preds
         if options.save_preds:
-            np.save("%s/preds.npy" % options.out_dir, preds)
+            np.save(f"{options.out_dir}/preds.npy", preds)
 
         # save full model
         if options.xgboost:
@@ -224,18 +225,34 @@ def main():
             model = full_randfor(
                 X, y, n_estimators=options.n_estimators, min_samples_leaf=options.msl
             )
-        joblib.dump(model, "%s/model.pkl" % options.out_dir)
+        joblib.dump(model, f"{options.out_dir}/model.pkl")
+
+        # save model hyperparameters for reproducibility
+        model_params = model.get_params() if hasattr(model, "get_params") else {}
+        meta = {
+            "classifier": "xgboost" if options.xgboost else "random_forest",
+            "model_params": model_params,
+            "folds": options.num_folds,
+            "iterations": options.iterations,
+            "score_keys": options.score_keys,
+            "abs_value": options.abs_value,
+            "indel": options.indel,
+            "indel_scale": options.indel_scale,
+            "targets_file": options.targets_file,
+            "random_seed": options.random_seed,
+        }
+        with open(os.path.join(options.out_dir, "model_params.json"), "w") as jf:
+            json.dump(meta, jf, indent=2)
 
     # save
-    np.save("%s/aurocs.npy" % options.out_dir, aurocs)
-    np.save("%s/fpr_mean.npy" % options.out_dir, fpr_mean)
-    np.save("%s/tpr_mean.npy" % options.out_dir, tpr_mean)
+    np.save(f"{options.out_dir}/aurocs.npy", aurocs)
+    np.save(f"{options.out_dir}/fpr_mean.npy", fpr_mean)
+    np.save(f"{options.out_dir}/tpr_mean.npy", tpr_mean)
 
     # print stats
-    stats_out = open("%s/stats.txt" % options.out_dir, "w")
-    auroc_stdev = np.std(aurocs) / np.sqrt(len(aurocs))
-    print("AUROC: %.4f (%.4f)" % (np.mean(aurocs), auroc_stdev), file=stats_out)
-    stats_out.close()
+    with open(f"{options.out_dir}/stats.txt", "w") as stats_out:
+        auroc_stdev = np.std(aurocs) / np.sqrt(len(aurocs))
+        print(f"AUROC: {np.mean(aurocs):.4f} ({auroc_stdev:.4f})", file=stats_out)
 
     # plot roc
     plot_roc(fpr_folds, tpr_folds, options.out_dir)
@@ -545,6 +562,7 @@ def full_xgboost(
         objective="binary:logistic",
         n_jobs=-1,
         colsample_bytree=0.5,
+        min_child_weight=2,
         random_state=random_state,
     )
     model.fit(X, y)
