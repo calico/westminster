@@ -159,7 +159,7 @@ class Eval:
         For each credible set, compute distance to the subset of genes that are scored by Borzoi to increase speed.
         Raise an Exception if there are no genes in this subset.
             Note:
-            # This means I am only computing distance-to-TSS for genes within a 196608kb window of \
+            # This means I am only computing distance-to-TSS for genes within a 196kb window of \
             # at-least one variant in order to identify the nearest gene.
             # If there is any gene in this set, it will include by definition the nearest gene.
             # If there is no gene in this set, check distances for all genes to find the closest gene.
