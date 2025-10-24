@@ -1,5 +1,3 @@
-import numpy
-import pandas
 
 """
 Parse a GENCODE GTF file and return a dictionary of gene data.
