@@ -303,6 +303,7 @@ def main():
                             cmd += "conda activate %s;" % options.conda_env
                             cmd += " echo $HOSTNAME;"
                             cmd += " hound_eval_spec.py"
+                            cmd += " --disk"
                             cmd += " --head %d" % di
                             cmd += " -o %s" % out_dir
                             cmd += " --step %d" % options.step
@@ -323,7 +324,7 @@ def main():
                                 queue=options.queue,
                                 cpu=num_cpu,
                                 gpu=num_gpu,
-                                mem=120000,
+                                mem=90000,
                                 time="%d:00:00" % (3 * time_base),
                             )
                             jobs.append(job)

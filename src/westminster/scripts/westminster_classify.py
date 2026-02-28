@@ -67,7 +67,7 @@ def main():
     parser.add_option(
         "-l",
         dest="learning_rate",
-        default=0.05,
+        default=0.03,
         type="float",
         help="XGBoost learning rate [Default: %default]",
     )
@@ -75,7 +75,7 @@ def main():
     parser.add_option(
         "--md",
         dest="max_depth",
-        default=4,
+        default=6,
         type="int",
         help="XGBoost max_depth [Default: %default]",
     )
@@ -89,7 +89,7 @@ def main():
     parser.add_option(
         "-n",
         dest="n_estimators",
-        default=100,
+        default=128,
         type="int",
         help="RandomForest / XGBoost n_estimators [Default: %default]",
     )

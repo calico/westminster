@@ -124,21 +124,21 @@ def main():
     class_group.add_argument(
         "-l",
         dest="learning_rate",
-        default=0.05,
+        default=0.03,
         type=float,
         help="XGBoost learning rate",
     )
     class_group.add_argument(
         "--md",
         dest="max_depth",
-        default=4,
+        default=6,
         type=int,
         help="XGBoost max_depth",
     )
     class_group.add_argument(
         "--ne",
         dest="n_estimators",
-        default=100,
+        default=128,
         type=int,
         help="XGBoost n_estimators",
     )

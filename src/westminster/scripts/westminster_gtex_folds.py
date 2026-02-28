@@ -165,7 +165,6 @@ def main():
     )
     fold_group.add_argument(
         "-p",
-        "--parallel_jobs",
         dest="parallel_jobs",
         default=None,
         type=int,
@@ -174,7 +173,7 @@ def main():
     fold_group.add_argument(
         "-j",
         dest="job_size",
-        default=256,
+        default=512,
         type=int,
         help="Number of SNPs to process per job",
     )

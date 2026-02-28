@@ -227,9 +227,9 @@ def main():
                     cmd += f" --shifts {options.shifts}"
                 if options.span:
                     cmd += " --span"
-                    job_mem = 240000
+                    job_mem = 90000
                 else:
-                    job_mem = 150000
+                    job_mem = 30000
                 if options.targets_file is not None:
                     cmd += f" -t {options.targets_file}"
                 cmd += f" {params_file}"
