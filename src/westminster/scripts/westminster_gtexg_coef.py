@@ -88,6 +88,11 @@ def main():
     metrics_sauroc = []
     metrics_cauroc = []
     metrics_r = []
+    metrics_meas = []
+    metrics_meas_sauroc = []
+    metrics_meas_cauroc = []
+    metrics_meas_r = []
+
     for tissue, keyword in tissue_keywords.items():
         if args.verbose:
             print(tissue)
@@ -109,7 +114,7 @@ def main():
                 print(f"Skipping {tissue} due to missing targets.", file=sys.stderr)
                 continue
 
-            # compute AUROCs
+            # sign AUROC
             sign_auroc = roc_auc_score(eqtl_df.coef > 0, eqtl_df.score)
 
             # compute SpearmanR
@@ -117,6 +122,19 @@ def main():
 
             # classification AUROC
             class_auroc = classify_auroc(gtex_scores_file, keyword, args.snp_stat)
+
+            # measured fraction
+            meas_frac = np.mean(eqtl_df.measured)
+            eqtl_meas_df = eqtl_df[eqtl_df.measured]
+
+            # measured sign AUROC
+            sign_auroc_meas = roc_auc_score(eqtl_meas_df.coef > 0, eqtl_meas_df.score)
+
+            # measured SpearmanR
+            coef_r_meas = spearmanr(eqtl_meas_df.coef, eqtl_meas_df.score)[0]
+
+            # measured classification AUROC
+            class_auroc_meas = classify_auroc(gtex_scores_file, keyword, args.snp_stat)
 
             if args.plot:
                 eqtl_df.to_csv(f"{args.out_dir}/{tissue}.tsv", index=False, sep="\t")
@@ -133,6 +151,10 @@ def main():
             metrics_sauroc.append(sign_auroc)
             metrics_cauroc.append(class_auroc)
             metrics_r.append(coef_r)
+            metrics_meas.append(meas_frac)
+            metrics_meas_sauroc.append(sign_auroc_meas)
+            metrics_meas_cauroc.append(class_auroc_meas)
+            metrics_meas_r.append(coef_r_meas)
 
             if args.verbose:
                 print("")
@@ -144,6 +166,10 @@ def main():
             "auroc_sign": metrics_sauroc,
             "spearmanr": metrics_r,
             "auroc_class": metrics_cauroc,
+            "measured": metrics_meas,
+            "measured_auroc_sign": metrics_meas_sauroc,
+            "measured_auroc_class": metrics_meas_cauroc,
+            "measured_spearmanr": metrics_meas_r,
         }
     )
     metrics_df.to_csv(
@@ -154,6 +180,10 @@ def main():
     print("Sign AUROC:  %.4f" % np.mean(metrics_df.auroc_sign))
     print("SpearmanR:   %.4f" % np.mean(metrics_df.spearmanr))
     print("Class AUROC: %.4f" % np.mean(metrics_df.auroc_class))
+    print("Measured fraction: %.4f" % np.mean(metrics_df.measured))
+    print("Measured Sign AUROC:  %.4f" % np.mean(metrics_df.measured_auroc_sign))
+    print("Measured SpearmanR:   %.4f" % np.mean(metrics_df.measured_spearmanr))
+    print("Measured Class AUROC: %.4f" % np.mean(metrics_df.measured_auroc_class))
 
 
 def read_eqtl(tissue: str, gtex_vcf_dir: str, pip_t: float = 0.9):
@@ -315,6 +345,7 @@ def add_scores(
     )
 
     scores_out = []
+    measured = []
     for _, eqtl in eqtl_df.iterrows():
         variant = eqtl.variant
         gene_trim = eqtl.gene  # already trimmed upstream
@@ -325,10 +356,13 @@ def add_scores(
             if row is not None:
                 vals = data["stat_matrix"][row, match_tis].astype("float32")
                 sgs = float(np.mean(vals))
+                meas = True
             else:
                 sgs = 0.0
+                meas = False
         else:
             sgs = 0.0
+            meas = False
 
         # flip sign if allele1 != reference
         if sgs != 0.0 and si is not None and data["ref_alleles"]:
@@ -336,8 +370,11 @@ def add_scores(
             if ref_a != eqtl.allele1:
                 sgs *= -1
         scores_out.append(sgs)
+        measured.append(meas)
 
+    # attach score
     eqtl_df["score"] = scores_out
+    eqtl_df["measured"] = measured
     return eqtl_df
 
 
