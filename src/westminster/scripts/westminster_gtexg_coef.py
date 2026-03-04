@@ -134,7 +134,10 @@ def main():
             coef_r_meas = spearmanr(eqtl_meas_df.coef, eqtl_meas_df.score)[0]
 
             # measured classification AUROC
-            class_auroc_meas = classify_auroc(gtex_scores_file, keyword, args.snp_stat)
+            measured_snps = set(eqtl_meas_df.variant)
+            class_auroc_meas = classify_auroc(
+                gtex_scores_file, keyword, args.snp_stat, measured_snps=measured_snps
+            )
 
             if args.plot:
                 eqtl_df.to_csv(f"{args.out_dir}/{tissue}.tsv", index=False, sep="\t")
@@ -386,42 +389,55 @@ def _aggregate_scores_across_genes(data: dict, match_tis: np.ndarray):
         match_tis: Array of target indices that match the tissue
 
     Returns:
-        Dictionary mapping SNP -> aggregated score
+        snp_scores: Dictionary mapping SNP -> aggregated score
+        scored_snps: Set of SNPs with at least one gene pair
     """
     snp_scores = {snp: 0.0 for snp in data["snps"]}
+    scored_snps = set()
 
     for (si, gi), row in data["pair_row"].items():
         snp = data["snps"][si]
+        scored_snps.add(snp)
         vals = data["stat_matrix"][row, match_tis].astype("float32")
         score = float(np.mean(vals))
         snp_scores[snp] += np.abs(score)
 
-    return snp_scores
+    return snp_scores, scored_snps
 
 
-def classify_auroc(gtex_scores_file: str, keyword: str, score_key: str = "logSUM"):
-    """Read eQTL RNA predictions for negatives from the given tissue.
+def classify_auroc(
+    gtex_scores_file: str,
+    keyword: str,
+    score_key: str = "logSUM",
+    measured_snps: set = None,
+):
+    """Classify eQTL positives vs negatives and compute AUROC.
 
     Args:
-      gtex_scores_file (str): Variant scores HDF5.
-      tissue_keyword (str): tissue keyword, for matching GTEx targets
-      score_key (str): score key in HDF5 file
-      verbose (bool): Print matching targets.
+      gtex_scores_file (str): Positive variant scores HDF5.
+      keyword (str): Tissue keyword for matching GTEx targets.
+      score_key (str): Score key in HDF5 file.
+      measured_snps (set): If provided, filter positives to this set
+          and negatives to those with at least one scored gene pair.
 
     Returns:
-      class_auroc (float): Classification AUROC.
+      float: Classification AUROC.
     """
     # Match tissue targets
     match_tis = _match_tissue_targets(gtex_scores_file, keyword)
 
     # Score positives using all genes
     data_pos = _load_hdf5_data(gtex_scores_file, score_key)
-    psnp_scores = _aggregate_scores_across_genes(data_pos, match_tis)
+    psnp_scores, _ = _aggregate_scores_across_genes(data_pos, match_tis)
+    if measured_snps is not None:
+        psnp_scores = {s: v for s, v in psnp_scores.items() if s in measured_snps}
 
     # Score negatives
     gtex_nscores_file = gtex_scores_file.replace("_pos", "_neg")
     data_neg = _load_hdf5_data(gtex_nscores_file, score_key)
-    nsnp_scores = _aggregate_scores_across_genes(data_neg, match_tis)
+    nsnp_scores, neg_scored_snps = _aggregate_scores_across_genes(data_neg, match_tis)
+    if measured_snps is not None:
+        nsnp_scores = {s: v for s, v in nsnp_scores.items() if s in neg_scored_snps}
 
     # compute AUROC
     Xp = list(psnp_scores.values())
