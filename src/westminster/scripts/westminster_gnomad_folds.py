@@ -53,6 +53,25 @@ def main():
         help="Genome FASTA for sequences",
     )
     snp_group.add_argument(
+        "-g",
+        dest="genes_gtf",
+        default=None,
+        help="GTF for gene annotations. Enables gene scoring.",
+    )
+    snp_group.add_argument(
+        "--center_gene",
+        dest="center_gene",
+        default=False,
+        action="store_true",
+        help="Center sequences on genes instead of variants (requires -g)",
+    )
+    snp_group.add_argument(
+        "--gene_cov_t",
+        type=float,
+        default=0.0,
+        help="Minimum gene coverage fraction to include",
+    )
+    snp_group.add_argument(
         "--head",
         dest="head",
         default=0,
@@ -92,6 +111,13 @@ def main():
         default="0",
         type=str,
         help="Ensemble prediction shifts",
+    )
+    snp_group.add_argument(
+        "--span",
+        dest="span",
+        default=False,
+        action="store_true",
+        help="In gene scoring mode, aggregate entire gene span",
     )
     snp_group.add_argument(
         "--stats",
@@ -175,7 +201,6 @@ def main():
         help="Subset of folds to evaluate (encoded as comma-separated string)",
     )
     fold_group.add_argument(
-        "-g",
         "--gnomad",
         dest="gnomad_vcf_dir",
         default="/group/fdna/public/genomes/hg38/gnomad",
@@ -233,8 +258,15 @@ def main():
     # extract output subdirectory name
     gnomad_out_dir = args.out_dir
 
-    # split SNP stats
-    snp_stats = args.snp_stats.split(",")
+    # split SNP stats and normalize to HDF5 keys
+    # baskerville-torch stores stats with prefix: cov/, covgene/, gene/
+    # unprefixed stats like "logD2" are stored as "cov/logD2"
+    snp_stats = []
+    for s in args.snp_stats.split(","):
+        if s.startswith("covgene/") or s.startswith("gene/") or s.startswith("cov/"):
+            snp_stats.append(s)
+        else:
+            snp_stats.append(f"cov/{s}")
 
     ################################################################
     # score SNPs
@@ -267,9 +299,9 @@ def main():
     if args.class_targets_file is not None:
         cmd_base += f" -t {args.class_targets_file}"
 
-    classify_stats = snp_stats
+    classify_stats = list(snp_stats)
     if len(classify_stats) > 1:
-        classify_stats.append(args.snp_stats)
+        classify_stats.append(",".join(snp_stats))
 
     jobs = []
     for ci in range(args.crosses):
@@ -278,7 +310,7 @@ def main():
             it_out_dir = f"{it_dir}/{gnomad_out_dir}"
 
             for snp_stat in classify_stats:
-                stat_label = snp_stat.replace(",", "-")
+                stat_label = snp_stat.replace(",", "-").replace("/", "-")
                 class_out_dir = f"{it_out_dir}/class{args.variants_label}-{stat_label}"
                 if args.class_name is not None:
                     class_out_dir += f"-{args.class_name}"
@@ -314,7 +346,7 @@ def main():
     ens_common_dir = f"{ensemble_out_dir}/common{args.variants_label}"
 
     for snp_stat in classify_stats:
-        stat_label = snp_stat.replace(",", "-")
+        stat_label = snp_stat.replace(",", "-").replace("/", "-")
         class_out_dir = f"{ensemble_out_dir}/class{args.variants_label}-{stat_label}"
         if args.class_name is not None:
             class_out_dir += f"-{args.class_name}"
