@@ -286,7 +286,7 @@ def read_scores(
     Returns:
       np.array: eQTL predictions
     """
-    targets_file = gtex_scores_file.replace("scores.h5", "targets.txt")
+    targets_file = gtex_scores_file.replace("scores.h5", "targets_cov.txt")
     targets_df = pd.read_csv(targets_file, sep="\t", index_col=0)
 
     # determine matching GTEx targets
@@ -348,7 +348,7 @@ def classify_auroc(
     """
     gtex_nscores_file = gtex_scores_file.replace("_pos", "_neg")
 
-    targets_file = gtex_nscores_file.replace("scores.h5", "targets.txt")
+    targets_file = gtex_nscores_file.replace("scores.h5", "targets_cov.txt")
     targets_df = pd.read_csv(targets_file, sep="\t", index_col=0)
 
     with h5py.File(gtex_nscores_file, "r") as gtex_scores_h5:

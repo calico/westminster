@@ -229,18 +229,30 @@ def read_eqtl(tissue: str, gtex_vcf_dir: str, pip_t: float = 0.9):
     return eqtl_df
 
 
-def _match_tissue_targets(gtex_scores_file: str, keyword: str, verbose: bool = False):
+def _match_tissue_targets(
+    gtex_scores_file: str,
+    keyword: str,
+    score_key: str = "logSUM",
+    verbose: bool = False,
+):
     """Match tissue targets based on keyword.
 
     Args:
         gtex_scores_file: Path to the HDF5 scores file
         keyword: Tissue keyword to match
+        score_key: Score key to determine which targets file to use
         verbose: If True, print matching targets
 
     Returns:
         Array of target indices that match the tissue keyword
     """
-    targets_file = gtex_scores_file.replace("scores.h5", "targets.txt")
+    if score_key.startswith("gene/"):
+        targets_name = "targets_gene.txt"
+        gene_scores = True
+    else:
+        targets_name = "targets_cov.txt"
+        gene_scores = False
+    targets_file = gtex_scores_file.replace("scores.h5", targets_name)
     targets_df = pd.read_csv(targets_file, sep="\t", index_col=0)
     target_ids = targets_df.identifier.values
     target_labels = targets_df.description.values
@@ -248,7 +260,8 @@ def _match_tissue_targets(gtex_scores_file: str, keyword: str, verbose: bool = F
     # Match tissue targets
     match_tis = []
     for ti, (tid, tlab) in enumerate(zip(target_ids, target_labels)):
-        if "GTEX" in tid and keyword in tlab:
+        tlab = tlab.lower()
+        if keyword in tlab and ("GTEX" in tid or gene_scores):
             if not (keyword == "blood" and "vessel" in tlab):
                 if verbose:
                     print(ti, tid, tlab)
@@ -337,7 +350,7 @@ def add_scores(
       pd.DataFrame: Updated eQTL DataFrame with scores.
     """
     # Match tissue targets
-    match_tis = _match_tissue_targets(gtex_scores_file, keyword, verbose)
+    match_tis = _match_tissue_targets(gtex_scores_file, keyword, score_key, verbose)
 
     # Load HDF5 data and mappings
     data = _load_hdf5_data(gtex_scores_file, score_key)
@@ -424,7 +437,7 @@ def classify_auroc(
       float: Classification AUROC.
     """
     # Match tissue targets
-    match_tis = _match_tissue_targets(gtex_scores_file, keyword)
+    match_tis = _match_tissue_targets(gtex_scores_file, keyword, score_key)
 
     # Score positives using all genes
     data_pos = _load_hdf5_data(gtex_scores_file, score_key)

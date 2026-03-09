@@ -115,7 +115,7 @@ def main():
     parser.add_option(
         "-e",
         dest="conda_env",
-        default="tf15b",
+        default="torch2.6",
         help="Anaconda environment [Default: %default]",
     )
     parser.add_option(
