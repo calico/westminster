@@ -287,7 +287,12 @@ def read_scores(
       np.array: eQTL predictions
     """
     targets_file = gtex_scores_file.replace("scores.h5", "targets_cov.txt")
-    targets_df = pd.read_csv(targets_file, sep="\t", index_col=0)
+    # TEMP handling original format
+    try:
+        targets_df = pd.read_csv(targets_file, sep="\t", index_col=0)
+    except FileNotFoundError:
+        targets_file = targets_file.replace("targets_cov.txt", "targets.txt")
+        targets_df = pd.read_csv(targets_file, sep="\t", index_col=0)
 
     # determine matching GTEx targets
     target_ids = targets_df.identifier.values
