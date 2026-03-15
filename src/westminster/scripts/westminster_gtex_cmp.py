@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-from optparse import OptionParser
+import argparse
 import glob
 import pdb
 import os
@@ -26,46 +26,48 @@ Compare multiple variant score sets on the GTEx fine mapped eQTL benchmark.
 # main
 ################################################################################
 def main():
-    usage = "usage: %prog [options] <bench1_dir> <bench2_dir> ..."
-    parser = OptionParser(usage)
-    parser.add_option(
+    parser = argparse.ArgumentParser(
+        description="Compare multiple variant score sets on the GTEx fine mapped eQTL benchmark."
+    )
+    parser.add_argument(
         "-a",
         "--alt",
         dest="alternative",
         default="two-sided",
-        help="Statistical test alternative [Default: %default]",
+        help="Statistical test alternative.",
     )
-    parser.add_option(
+    parser.add_argument(
         "--hue",
         dest="plot_hue",
         default=False,
         action="store_true",
-        help="Scatter plot variant number as hue [Default: %default]",
+        help="Scatter plot variant number as hue.",
     )
-    parser.add_option("-l", dest="labels")
-    parser.add_option("-o", dest="out_dir", default="compare_scores")
-    parser.add_option("-s", "--stats", dest="stats", default="logD2")
-    parser.add_option(
+    parser.add_argument("-l", dest="labels")
+    parser.add_argument("-o", dest="out_dir", default="compare_scores")
+    parser.add_argument("-s", "--scores", dest="scores", default="cov/logD2")
+    parser.add_argument(
         "-v",
         dest="min_variants",
         default=0,
-        type="int",
-        help="Minimum variants to include tissue [Default: %default]",
+        type=int,
+        help="Minimum variants to include tissue.",
     )
-    (options, args) = parser.parse_args()
-
-    if len(args) == 0:
-        parser.error("Must provide classification output directories")
-    else:
-        bench_dirs = args
+    parser.add_argument(
+        "bench_dirs",
+        nargs="+",
+        help="Classification output directories.",
+    )
+    options = parser.parse_args()
+    bench_dirs = options.bench_dirs
 
     if not os.path.isdir(options.out_dir):
         os.mkdir(options.out_dir)
 
     num_benches = len(bench_dirs)
-    sad_stats = [stat for stat in options.stats.split(",")]
-    if len(sad_stats) == 1:
-        sad_stats = sad_stats * num_benches
+    scores = [score for score in options.scores.split(",")]
+    if len(scores) == 1:
+        scores = scores * num_benches
 
     sns.set(font_scale=1.2, style="ticks")
 
@@ -86,23 +88,25 @@ def main():
     df_tp = []
 
     # determine tissues
-    tissue_bench_dirs0 = glob.glob("%s/*_class-%s" % (bench_dirs[0], sad_stats[0]))
+    score_strs = [score.replace("/", "-") for score in scores]
+    tissue_bench_dirs0 = glob.glob(f"{bench_dirs[0]}/*_class-{score_strs[0]}")
     tissue_class_dirs = [tbd.split("/")[-1] for tbd in tissue_bench_dirs0]
     tissues = [tcd[: tcd.find("_class")] for tcd in tissue_class_dirs]
+    print(f"Found {len(tissues)} tissues")
 
     for tissue in tissues:
-        tissue_out_dir = "%s/%s" % (options.out_dir, tissue)
+        tissue_out_dir = f"{options.out_dir}/{tissue}"
         if not os.path.isdir(tissue_out_dir):
             os.mkdir(tissue_out_dir)
 
         # count variants
-        tissue_scores_file = "%s/%s_pos/scores.h5" % (bench_dirs[0], tissue)
+        tissue_scores_file = f"{bench_dirs[0]}/{tissue}_pos/scores.h5"
         # TEMP while I still have 'sad' around
         if not os.path.isfile(tissue_scores_file):
-            tissue_scores_file = "%s/%s_pos/sad.h5" % (bench_dirs[0], tissue)
+            tissue_scores_file = f"{bench_dirs[0]}/{tissue}_pos/sad.h5"
         with h5py.File(tissue_scores_file, "r") as tissue_scores_h5:
-            sad_stat_up = sad_stats[0]
-            num_variants = tissue_scores_h5[sad_stat_up].shape[0]
+            score_up = scores[0]
+            num_variants = tissue_scores_h5[score_up].shape[0]
 
         # filter variants
         if num_variants >= options.min_variants:
@@ -111,18 +115,14 @@ def main():
             bench_fpr_mean = []
             bench_aurocs = []
             for i in range(num_benches):
-                tissue_class_dir_i = "%s/%s_class-%s" % (
-                    bench_dirs[i],
-                    tissue,
-                    sad_stats[i],
-                )
+                tissue_class_dir_i = f"{bench_dirs[i]}/{tissue}_class-{score_strs[i]}"
                 try:
-                    tpr_mean = np.load("%s/tpr_mean.npy" % tissue_class_dir_i)
-                    fpr_mean = np.load("%s/fpr_mean.npy" % tissue_class_dir_i)
-                    aurocs = np.load("%s/aurocs.npy" % tissue_class_dir_i)
+                    tpr_mean = np.load(f"{tissue_class_dir_i}/tpr_mean.npy")
+                    fpr_mean = np.load(f"{tissue_class_dir_i}/fpr_mean.npy")
+                    aurocs = np.load(f"{tissue_class_dir_i}/aurocs.npy")
                 except FileNotFoundError:
                     print(
-                        "Failed run for %s w/ %d variants" % (tissue, num_variants),
+                        f"Failed run for {tissue} w/ {num_variants} variants",
                         file=sys.stderr,
                     )
                 bench_tpr_mean.append(tpr_mean)
@@ -132,7 +132,7 @@ def main():
             # mean ROC plot
             plt.figure(figsize=(6, 6))
             for i in range(num_benches):
-                label_i = "%s AUROC %.4f" % (options.labels[i], bench_aurocs[i].mean())
+                label_i = f"{options.labels[i]} AUROC {bench_aurocs[i].mean():.4f}"
                 plt.plot(bench_fpr_mean[i], bench_tpr_mean[i], alpha=0.5, label=label_i)
             plt.legend()
             ax = plt.gca()
@@ -140,10 +140,10 @@ def main():
             ax.set_ylabel("True positive rate")
             sns.despine()
             plt.tight_layout()
-            plt.savefig("%s/roc_full.pdf" % tissue_out_dir)
+            plt.savefig(f"{tissue_out_dir}/roc_full.pdf")
             plt.close()
 
-            # scatter plot versions' fold AUROCss
+            # scatter plot versions' fold AUROCs
             for i in range(num_benches):
                 for j in range(i + 1, num_benches):
                     if len(bench_aurocs[i]) == len(bench_aurocs[j]):
@@ -162,13 +162,12 @@ def main():
                         ax.plot(
                             [vmin, vmax], [vmin, vmax], linestyle="--", color="gold"
                         )
-                        ax.set_xlabel("%s fold AUROC" % options.labels[i])
-                        ax.set_ylabel("%s fold AUROC" % options.labels[j])
+                        ax.set_xlabel(f"{options.labels[i]} fold AUROC")
+                        ax.set_ylabel(f"{options.labels[j]} fold AUROC")
                         sns.despine()
                         plt.tight_layout()
                         plt.savefig(
-                            "%s/auroc_%s_%s.pdf"
-                            % (tissue_out_dir, options.labels[i], options.labels[j])
+                            f"{tissue_out_dir}/auroc_{options.labels[i]}_{options.labels[j]}.pdf"
                         )
                         plt.close()
 
@@ -214,7 +213,7 @@ def main():
 
     # print table
     df_cmp.sort_values("variants", inplace=True)
-    df_cmp.to_csv("%s/table_cmp.tsv" % options.out_dir, sep="\t")
+    df_cmp.to_csv(f"{options.out_dir}/table_cmp.tsv", sep="\t")
     table_cmp = tabulate(df_cmp, headers="keys", tablefmt="github")
     border = table_cmp.split("\n")[1].replace("|", "-")
     print(border)
@@ -222,7 +221,7 @@ def main():
     print(border)
 
     if num_benches == 1:
-        print("%s AUROC: %.4f" % (options.labels[0], np.mean(bench_aurocs)))
+        print(f"{options.labels[0]} AUROC: {np.mean(bench_aurocs):.4f}")
     else:
         # scatter plot pairs
         for i in range(num_benches):
@@ -255,25 +254,24 @@ def main():
                 ax.text(
                     1 - eps,
                     eps,
-                    "Mean %.3f" % df_cmp_ij.auroc1.mean(),
+                    f"Mean {df_cmp_ij.auroc1.mean():.3f}",
                     horizontalalignment="right",
                     transform=ax.transAxes,
                 )
                 ax.text(
                     eps,
                     1 - eps,
-                    "Mean %.3f" % df_cmp_ij.auroc2.mean(),
+                    f"Mean {df_cmp_ij.auroc2.mean():.3f}",
                     verticalalignment="top",
                     transform=ax.transAxes,
                 )
 
-                ax.set_xlabel("%s AUROC" % options.labels[i])
-                ax.set_ylabel("%s AUROC" % options.labels[j])
+                ax.set_xlabel(f"{options.labels[i]} AUROC")
+                ax.set_ylabel(f"{options.labels[j]} AUROC")
                 sns.despine()
                 plt.tight_layout()
                 plt.savefig(
-                    "%s/auroc_%s_%s.pdf"
-                    % (options.out_dir, options.labels[i], options.labels[j])
+                    f"{options.out_dir}/auroc_{options.labels[i]}_{options.labels[j]}.pdf"
                 )
                 plt.close()
 
@@ -284,10 +282,10 @@ def main():
                     df_cmp_ij.auroc1, df_cmp_ij.auroc2, alternative=options.alternative
                 )[1]
                 print("")
-                print("%s AUROC: %.4f" % (options.labels[i], df_cmp_ij.auroc1.mean()))
-                print("%s AUROC: %.4f" % (options.labels[j], df_cmp_ij.auroc2.mean()))
-                print("Wilcoxon p: %.3g" % wilcoxon_p)
-                print("T-test p:   %.3g" % ttest_p)
+                print(f"{options.labels[i]} AUROC: {df_cmp_ij.auroc1.mean():.4f}")
+                print(f"{options.labels[j]} AUROC: {df_cmp_ij.auroc2.mean():.4f}")
+                print(f"Wilcoxon p: {wilcoxon_p:.3g}")
+                print(f"T-test p:   {ttest_p:.3g}")
 
 
 ################################################################################
