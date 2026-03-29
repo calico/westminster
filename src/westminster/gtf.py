@@ -21,6 +21,7 @@ def parse_gtf_file(file_path):
             if feature_type == "gene":
                 gene_id = None
                 gene_name = None
+                gene_type = None
 
                 attributes = parts[8].split("; ")
                 for attribute in attributes:
@@ -44,6 +45,7 @@ def parse_gtf_file(file_path):
             elif feature_type == "transcript":
                 gene_id = None
                 transcript_id = None
+                transcript_type = None
 
                 if strand == "+":
                     transcript_start = int(parts[3])
@@ -65,7 +67,7 @@ def parse_gtf_file(file_path):
                     elif key == "transcript_type":
                         transcript_type = value.strip('";')
 
-                if gene_id and transcript_id:
+                if gene_id and transcript_id and gene_id in gene_data:
                     gene_data[gene_id]["transcripts"].append(
                         {
                             "transcript_id": transcript_id,

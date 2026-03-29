@@ -17,6 +17,7 @@ dependencies = [
     "h5py~=3.10.0",
     "numpy~=1.24.3",
     "pandas~=1.5.3",
+    "pybedtools~=0.12",
 ]
 
 [project.optional-dependencies]

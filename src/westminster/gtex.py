@@ -62,7 +62,7 @@ def vcf_tss_dist(vcf_file, genes_bed_file):
     snp_order = [vc[2] for vc in vcf_bt]
     # closest requires sorted input; t='first' avoids duplicate rows on ties
     dist_hash = {
-        vc[2]: max(int(vc[-1]), 0)
+        vc[2]: (np.nan if int(vc[-1]) == -1 else int(vc[-1]))
         for vc in vcf_bt.sort(header=True).closest(genes_bt, d=True, t="first")
     }
     distances = np.array([dist_hash[v] for v in snp_order])

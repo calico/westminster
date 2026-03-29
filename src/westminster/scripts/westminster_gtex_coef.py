@@ -230,7 +230,7 @@ def read_eqtl(tissue: str, tissue_vcf_file: str, pip_t: float = 0.9):
             [
                 line.split()[2]
                 for line in open(tissue_vcf_file)
-                if not line.startswith("##")
+                if not line.startswith("#")
             ]
         )
         consistent_mask = np.array(
@@ -278,7 +278,7 @@ def read_scores(
         targets_file = targets_file.replace("targets_cov.txt", "targets.txt")
         targets_df = pd.read_csv(targets_file, sep="\t", index_col=0)
 
-    match_tis = match_tissue_targets(targets_df, keyword, verbose)
+    match_tis = match_tissue_targets(targets_df, keyword, verbose=verbose)
 
     with h5py.File(gtex_scores_file, "r") as gtex_scores_h5:
         score_ref = np.array(
@@ -326,7 +326,7 @@ def read_neg_scores(
     targets_file = gtex_nscores_file.replace("scores.h5", "targets_cov.txt")
     targets_df = pd.read_csv(targets_file, sep="\t", index_col=0)
 
-    match_tis = match_tissue_targets(targets_df, keyword, verbose)
+    match_tis = match_tissue_targets(targets_df, keyword, verbose=verbose)
 
     with h5py.File(gtex_nscores_file, "r") as gtex_scores_h5:
         # mean across targets
