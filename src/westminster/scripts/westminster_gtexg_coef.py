@@ -1,18 +1,22 @@
 #!/usr/bin/env python
 import argparse
 import os
-import pdb
 import re
 import sys
 
 import h5py
 import numpy as np
 import pandas as pd
+import pybedtools
 from scipy.stats import spearmanr
 from sklearn.metrics import roc_auc_score
 
-import matplotlib.pyplot as plt
-import seaborn as sns
+from westminster.gtex import (
+    match_tissue_targets,
+    tissue_keywords,
+    trim_dot,
+    vcf_tss_dist,
+)
 
 """
 westminster_gtexg_coef.py
@@ -28,10 +32,10 @@ and coefficient correlations.
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "-o",
-        "--out_dir",
-        default="coef_out",
-        help="Output directory for tissue metrics",
+        "-b",
+        "--genes_bed_file",
+        default=f"{os.environ['HG38']}/genes/gencode48/gencode48_basic_protein_tss2.bed",
+        help="BED file of gene TSS positions, for computing variant distance to TSS",
     )
     parser.add_argument(
         "-g",
@@ -40,7 +44,10 @@ def main():
         help="GTEx VCF directory",
     )
     parser.add_argument(
-        "-p", "--plot", action="store_true", help="Generate tissue prediction plots"
+        "-o",
+        "--out_dir",
+        default="coef_out",
+        help="Output directory for tissue metrics",
     )
     parser.add_argument(
         "-s",
@@ -54,44 +61,7 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
 
-    tissue_keywords = {
-        "Adipose_Subcutaneous": "adipose",
-        "Adipose_Visceral_Omentum": "adipose",
-        "Adrenal_Gland": "adrenal_gland",
-        "Artery_Aorta": "heart",
-        "Artery_Tibial": "heart",
-        "Brain_Cerebellum": "brain",
-        "Brain_Cortex": "brain",
-        "Breast_Mammary_Tissue": "breast",
-        "Colon_Sigmoid": "colon",
-        "Colon_Transverse": "colon",
-        "Esophagus_Mucosa": "esophagus",
-        "Esophagus_Muscularis": "esophagus",
-        "Liver": "liver",
-        "Lung": "lung",
-        "Muscle_Skeletal": "muscle",
-        "Nerve_Tibial": "nerve",
-        "Ovary": "ovary",
-        "Pancreas": "pancreas",
-        "Pituitary": "pituitary",
-        "Prostate": "prostate",
-        "Skin_Not_Sun_Exposed_Suprapubic": "skin",
-        "Spleen": "spleen",
-        "Stomach": "stomach",
-        "Testis": "testis",
-        "Thyroid": "thyroid",
-        "Whole_Blood": "blood",
-    }
-    # 'Cells_Cultured_fibroblasts': 'fibroblast',
-
-    metrics_tissue = []
-    metrics_sauroc = []
-    metrics_cauroc = []
-    metrics_r = []
-    metrics_meas = []
-    metrics_meas_sauroc = []
-    metrics_meas_cauroc = []
-    metrics_meas_r = []
+    metrics_rows = []
 
     for tissue, keyword in tissue_keywords.items():
         if args.verbose:
@@ -117,64 +87,106 @@ def main():
             # sign AUROC
             sign_auroc = roc_auc_score(eqtl_df.coef > 0, eqtl_df.score)
 
-            # compute SpearmanR
+            # SpearmanR
             coef_r = spearmanr(eqtl_df.coef, eqtl_df.score)[0]
 
-            # classification AUROC
-            class_auroc = classify_auroc(gtex_scores_file, keyword, args.snp_stat)
-
-            # measured fraction
+            # measured metrics
             meas_frac = np.mean(eqtl_df.measured)
             eqtl_meas_df = eqtl_df[eqtl_df.measured]
-
-            # measured sign AUROC
             sign_auroc_meas = roc_auc_score(eqtl_meas_df.coef > 0, eqtl_meas_df.score)
-
-            # measured SpearmanR
             coef_r_meas = spearmanr(eqtl_meas_df.coef, eqtl_meas_df.score)[0]
+
+            # read pos+neg per-SNP aggregated scores
+            psnp_scores, _ = read_snp_scores(gtex_scores_file, keyword, args.snp_stat)
+            gtex_nscores_file = gtex_scores_file.replace("_pos", "_neg")
+            nsnp_scores, neg_scored_snps = read_snp_scores(
+                gtex_nscores_file, keyword, args.snp_stat
+            )
+
+            # classification AUROC
+            Xp = list(psnp_scores.values())
+            Xn = list(nsnp_scores.values())
+            class_auroc = roc_auc_score([1] * len(Xp) + [0] * len(Xn), Xp + Xn)
 
             # measured classification AUROC
             measured_snps = set(eqtl_meas_df.variant)
-            class_auroc_meas = classify_auroc(
-                gtex_scores_file, keyword, args.snp_stat, measured_snps=measured_snps
+            Xp_m = [v for s, v in psnp_scores.items() if s in measured_snps]
+            Xn_m = [v for s, v in nsnp_scores.items() if s in neg_scored_snps]
+            class_auroc_meas = roc_auc_score(
+                [1] * len(Xp_m) + [0] * len(Xn_m), Xp_m + Xn_m
             )
 
-            if args.plot:
-                eqtl_df.to_csv(f"{args.out_dir}/{tissue}.tsv", index=False, sep="\t")
+            # compute TSS distances (dict-based: eqtl_df order != VCF order)
+            tissue_vcf_file = f"{args.gtex_vcf_dir}/{tissue}_pos.vcf"
+            pos_tss_arr = vcf_tss_dist(tissue_vcf_file, args.genes_bed_file)
+            pos_vcf_variants = [
+                line.split()[2]
+                for line in open(tissue_vcf_file)
+                if not line.startswith("##")
+            ]
+            pos_tss_map = dict(zip(pos_vcf_variants, pos_tss_arr))
 
-                # scatterplot
-                plt.figure(figsize=(6, 6))
-                sns.scatterplot(x=eqtl_df.coef, y=eqtl_df.score, alpha=0.5, s=20)
-                plt.gca().set_xlabel("eQTL coefficient")
-                plt.gca().set_ylabel("Variant effect prediction")
-                plt.savefig(f"{args.out_dir}/{tissue}.png", dpi=300)
+            neg_vcf_file = f"{args.gtex_vcf_dir}/{tissue}_neg.vcf"
+            neg_tss_arr = vcf_tss_dist(neg_vcf_file, args.genes_bed_file)
+            neg_vcf_variants = [
+                line.split()[2]
+                for line in open(neg_vcf_file)
+                if not line.startswith("##")
+            ]
+            neg_tss_map = dict(zip(neg_vcf_variants, neg_tss_arr))
 
-            # save
-            metrics_tissue.append(tissue)
-            metrics_sauroc.append(sign_auroc)
-            metrics_cauroc.append(class_auroc)
-            metrics_r.append(coef_r)
-            metrics_meas.append(meas_frac)
-            metrics_meas_sauroc.append(sign_auroc_meas)
-            metrics_meas_cauroc.append(class_auroc_meas)
-            metrics_meas_r.append(coef_r_meas)
+            # write combined variant table
+            pos_var_df = (
+                eqtl_df.groupby("variant", sort=False)
+                .agg(coef=("coef", "mean"))
+                .reset_index()
+            )
+            pos_var_df = pos_var_df[pos_var_df.variant.isin(pos_tss_map)]
+            pos_var_df["pred"] = [psnp_scores.get(v, 0.0) for v in pos_var_df.variant]
+            pos_var_df["tss_dist"] = [pos_tss_map[v] for v in pos_var_df.variant]
+            pos_var_df["label"] = "pos"
+
+            neg_variants = [v for v in nsnp_scores if v in neg_tss_map]
+            neg_var_df = pd.DataFrame(
+                {
+                    "variant": neg_variants,
+                    "label": "neg",
+                    "coef": np.nan,
+                    "pred": [nsnp_scores[v] for v in neg_variants],
+                    "tss_dist": [neg_tss_map[v] for v in neg_variants],
+                }
+            )
+
+            scatter_df = pd.concat(
+                [
+                    pos_var_df[["variant", "label", "coef", "pred", "tss_dist"]],
+                    neg_var_df,
+                ],
+                ignore_index=True,
+            )
+            scatter_df.to_csv(f"{args.out_dir}/{tissue}.tsv", index=False, sep="\t")
+
+            # save metrics
+            metrics_rows.append(
+                {
+                    "tissue": tissue,
+                    "auroc_sign": sign_auroc,
+                    "spearmanr": coef_r,
+                    "auroc_class": class_auroc,
+                    "measured": meas_frac,
+                    "measured_auroc_sign": sign_auroc_meas,
+                    "measured_spearmanr": coef_r_meas,
+                    "measured_auroc_class": class_auroc_meas,
+                }
+            )
 
             if args.verbose:
                 print("")
 
-    # save metrics
-    metrics_df = pd.DataFrame(
-        {
-            "tissue": metrics_tissue,
-            "auroc_sign": metrics_sauroc,
-            "spearmanr": metrics_r,
-            "auroc_class": metrics_cauroc,
-            "measured": metrics_meas,
-            "measured_auroc_sign": metrics_meas_sauroc,
-            "measured_auroc_class": metrics_meas_cauroc,
-            "measured_spearmanr": metrics_meas_r,
-        }
-    )
+    pybedtools.cleanup()
+
+    # form metrics table
+    metrics_df = pd.DataFrame(metrics_rows)
     metrics_df.to_csv(
         f"{args.out_dir}/metrics.tsv", sep="\t", index=False, float_format="%.4f"
     )
@@ -235,42 +247,21 @@ def _match_tissue_targets(
     score_key: str = "logSUM",
     verbose: bool = False,
 ):
-    """Match tissue targets based on keyword.
-
-    Args:
-        gtex_scores_file: Path to the HDF5 scores file
-        keyword: Tissue keyword to match
-        score_key: Score key to determine which targets file to use
-        verbose: If True, print matching targets
-
-    Returns:
-        Array of target indices that match the tissue keyword
-    """
+    """Read targets file and match tissue targets."""
     if score_key.startswith("gene/"):
         targets_name = "targets_gene.txt"
-        gene_scores = True
+        gene_targets = True
     else:
         targets_name = "targets_cov.txt"
-        gene_scores = False
+        gene_targets = False
     targets_file = gtex_scores_file.replace("scores.h5", targets_name)
     targets_df = pd.read_csv(targets_file, sep="\t", index_col=0)
-    target_ids = targets_df.identifier.values
-    target_labels = targets_df.description.values
 
-    # Match tissue targets
-    match_tis = []
-    for ti, (tid, tlab) in enumerate(zip(target_ids, target_labels)):
-        tlab = tlab.lower()
-        if keyword in tlab and ("GTEX" in tid or gene_scores):
-            if not (keyword == "blood" and "vessel" in tlab):
-                if verbose:
-                    print(ti, tid, tlab)
-                match_tis.append(ti)
+    match_tis = match_tissue_targets(targets_df, keyword, gene_targets, verbose)
 
     if len(match_tis) == 0:
         raise ValueError(f"WARNING: No targets matched keyword '{keyword}'.")
-
-    return np.array(match_tis, dtype=int)
+    return match_tis
 
 
 def _load_hdf5_data(gtex_scores_file: str, score_key: str):
@@ -418,55 +409,21 @@ def _aggregate_scores_across_genes(data: dict, match_tis: np.ndarray):
     return snp_scores, scored_snps
 
 
-def classify_auroc(
-    gtex_scores_file: str,
-    keyword: str,
-    score_key: str = "logSUM",
-    measured_snps: set = None,
-):
-    """Classify eQTL positives vs negatives and compute AUROC.
+def read_snp_scores(gtex_scores_file, keyword, score_key="logSUM"):
+    """Return per-SNP aggregated absolute scores from gene-level HDF5.
 
     Args:
-      gtex_scores_file (str): Positive variant scores HDF5.
+      gtex_scores_file (str): Path to HDF5 scores file.
       keyword (str): Tissue keyword for matching GTEx targets.
       score_key (str): Score key in HDF5 file.
-      measured_snps (set): If provided, filter positives to this set
-          and negatives to those with at least one scored gene pair.
 
     Returns:
-      float: Classification AUROC.
+      snp_scores (dict): SNP -> aggregated abs score.
+      scored_snps (set): SNPs with at least one gene pair.
     """
-    # Match tissue targets
     match_tis = _match_tissue_targets(gtex_scores_file, keyword, score_key)
-
-    # Score positives using all genes
-    data_pos = _load_hdf5_data(gtex_scores_file, score_key)
-    psnp_scores, _ = _aggregate_scores_across_genes(data_pos, match_tis)
-    if measured_snps is not None:
-        psnp_scores = {s: v for s, v in psnp_scores.items() if s in measured_snps}
-
-    # Score negatives
-    gtex_nscores_file = gtex_scores_file.replace("_pos", "_neg")
-    data_neg = _load_hdf5_data(gtex_nscores_file, score_key)
-    nsnp_scores, neg_scored_snps = _aggregate_scores_across_genes(data_neg, match_tis)
-    if measured_snps is not None:
-        nsnp_scores = {s: v for s, v in nsnp_scores.items() if s in neg_scored_snps}
-
-    # compute AUROC
-    Xp = list(psnp_scores.values())
-    Xn = list(nsnp_scores.values())
-    X = Xp + Xn
-    y = [1] * len(Xp) + [0] * len(Xn)
-
-    return roc_auc_score(y, X)
-
-
-def trim_dot(gene_id):
-    """Trim dot off GENCODE id's."""
-    dot_i = gene_id.rfind(".")
-    if dot_i != -1:
-        gene_id = gene_id[:dot_i]
-    return gene_id
+    data = _load_hdf5_data(gtex_scores_file, score_key)
+    return _aggregate_scores_across_genes(data, match_tis)
 
 
 ################################################################################
