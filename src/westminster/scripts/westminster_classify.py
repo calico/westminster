@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import roc_auc_score, roc_curve
+from sklearn.metrics import average_precision_score, roc_auc_score, roc_curve
 from sklearn.model_selection import KFold
 import xgboost as xgb
 
@@ -287,6 +287,7 @@ def folds_randfor(
         sklearn random_state.
     """
     aurocs = []
+    auprcs = []
     fpr_folds = []
     tpr_folds = []
     fpr_fulls = []
@@ -332,8 +333,9 @@ def folds_randfor(
             interp_tpr[0] = 0.0
             tpr_mean.append(interp_tpr)
 
-            # compute AUROC
+            # compute AUROC and AUPRC
             aurocs.append(roc_auc_score(y[test_index], preds))
+            auprcs.append(average_precision_score(y[test_index], preds))
 
         fpr_full, tpr_full, _ = roc_curve(y, preds_full)
         fpr_fulls.append(fpr_full)
@@ -341,10 +343,11 @@ def folds_randfor(
         preds_return.append(preds_full)
 
     aurocs = np.array(aurocs)
+    auprcs = np.array(auprcs)
     tpr_mean = np.array(tpr_mean).mean(axis=0)
     preds_return = np.array(preds_return).T
 
-    return aurocs, fpr_folds, tpr_folds, fpr_mean, tpr_mean, preds_return
+    return aurocs, auprcs, fpr_folds, tpr_folds, fpr_mean, tpr_mean, preds_return
 
 
 def folds_single(X: np.array, y: np.array, folds: int = 8, random_state: int = 44):
@@ -362,6 +365,7 @@ def folds_single(X: np.array, y: np.array, folds: int = 8, random_state: int = 4
         sklearn random_state.
     """
     aurocs = []
+    auprcs = []
     fpr_folds = []
     tpr_folds = []
 
@@ -383,13 +387,15 @@ def folds_single(X: np.array, y: np.array, folds: int = 8, random_state: int = 4
         interp_tpr[0] = 0.0
         tpr_mean.append(interp_tpr)
 
-        # compute AUROC
+        # compute AUROC and AUPRC
         aurocs.append(roc_auc_score(y[test_index], preds))
+        auprcs.append(average_precision_score(y[test_index], preds))
 
     tpr_mean = np.array(tpr_mean).mean(axis=0)
 
     return (
         np.array(aurocs),
+        np.array(auprcs),
         np.array(fpr_folds),
         np.array(tpr_folds),
         fpr_mean,

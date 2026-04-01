@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pybedtools
 from scipy.stats import spearmanr
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import average_precision_score, roc_auc_score
 
 from westminster.gtex import (
     match_tissue_targets,
@@ -84,8 +84,9 @@ def main():
                 print(f"Skipping {tissue} due to missing targets.", file=sys.stderr)
                 continue
 
-            # sign AUROC
+            # sign AUROC/AUPRC
             sign_auroc = roc_auc_score(eqtl_df.coef > 0, eqtl_df.score)
+            sign_auprc = average_precision_score(eqtl_df.coef > 0, eqtl_df.score)
 
             # SpearmanR
             coef_r = spearmanr(eqtl_df.coef, eqtl_df.score)[0]
@@ -94,6 +95,9 @@ def main():
             meas_frac = np.mean(eqtl_df.measured)
             eqtl_meas_df = eqtl_df[eqtl_df.measured]
             sign_auroc_meas = roc_auc_score(eqtl_meas_df.coef > 0, eqtl_meas_df.score)
+            sign_auprc_meas = average_precision_score(
+                eqtl_meas_df.coef > 0, eqtl_meas_df.score
+            )
             coef_r_meas = spearmanr(eqtl_meas_df.coef, eqtl_meas_df.score)[0]
 
             # read pos+neg per-SNP aggregated scores
@@ -106,14 +110,20 @@ def main():
             # classification AUROC
             Xp = list(psnp_scores.values())
             Xn = list(nsnp_scores.values())
-            class_auroc = roc_auc_score([1] * len(Xp) + [0] * len(Xn), Xp + Xn)
+            class_labels = [1] * len(Xp) + [0] * len(Xn)
+            class_scores = Xp + Xn
+            class_auroc = roc_auc_score(class_labels, class_scores)
+            class_auprc = average_precision_score(class_labels, class_scores)
 
             # measured classification AUROC
             measured_snps = set(eqtl_meas_df.variant)
             Xp_m = [v for s, v in psnp_scores.items() if s in measured_snps]
             Xn_m = [v for s, v in nsnp_scores.items() if s in neg_scored_snps]
-            class_auroc_meas = roc_auc_score(
-                [1] * len(Xp_m) + [0] * len(Xn_m), Xp_m + Xn_m
+            class_labels_meas = [1] * len(Xp_m) + [0] * len(Xn_m)
+            class_scores_meas = Xp_m + Xn_m
+            class_auroc_meas = roc_auc_score(class_labels_meas, class_scores_meas)
+            class_auprc_meas = average_precision_score(
+                class_labels_meas, class_scores_meas
             )
 
             # compute TSS distances (dict-based: eqtl_df order != VCF order)
@@ -171,12 +181,16 @@ def main():
                 {
                     "tissue": tissue,
                     "auroc_sign": sign_auroc,
+                    "auprc_sign": sign_auprc,
                     "spearmanr": coef_r,
                     "auroc_class": class_auroc,
+                    "auprc_class": class_auprc,
                     "measured": meas_frac,
                     "measured_auroc_sign": sign_auroc_meas,
+                    "measured_auprc_sign": sign_auprc_meas,
                     "measured_spearmanr": coef_r_meas,
                     "measured_auroc_class": class_auroc_meas,
+                    "measured_auprc_class": class_auprc_meas,
                 }
             )
 
@@ -193,12 +207,16 @@ def main():
 
     # summarize
     print("Sign AUROC:  %.4f" % np.mean(metrics_df.auroc_sign))
+    print("Sign AUPRC:  %.4f" % np.mean(metrics_df.auprc_sign))
     print("SpearmanR:   %.4f" % np.mean(metrics_df.spearmanr))
     print("Class AUROC: %.4f" % np.mean(metrics_df.auroc_class))
+    print("Class AUPRC: %.4f" % np.mean(metrics_df.auprc_class))
     print("Measured fraction: %.4f" % np.mean(metrics_df.measured))
     print("Measured Sign AUROC:  %.4f" % np.mean(metrics_df.measured_auroc_sign))
+    print("Measured Sign AUPRC:  %.4f" % np.mean(metrics_df.measured_auprc_sign))
     print("Measured SpearmanR:   %.4f" % np.mean(metrics_df.measured_spearmanr))
     print("Measured Class AUROC: %.4f" % np.mean(metrics_df.measured_auroc_class))
+    print("Measured Class AUPRC: %.4f" % np.mean(metrics_df.measured_auprc_class))
 
 
 def read_eqtl(tissue: str, gtex_vcf_dir: str, pip_t: float = 0.9):
