@@ -27,7 +27,7 @@ import slurm
 from westminster.multi import nonzero_h5
 
 """
-westminster_gtexg_folds.py
+westminster_eqtlsed_folds.py
 
 Benchmark Baskerville model replicates on GTEx eQTL coefficient task.
 """
@@ -393,7 +393,7 @@ def main():
     ################################################################
     # coefficient analysis
 
-    cmd_base = "westminster_gtexg_coef.py -g %s" % options.gtex_vcf_dir
+    cmd_base = "westminster_eqtl_gtexg.py -g %s" % options.gtex_vcf_dir
 
     jobs = []
     for ci in range(options.crosses):

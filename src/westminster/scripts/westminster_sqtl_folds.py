@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2023 Calico LLC
+# Copyright 2026 Calico LLC
 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,17 +21,15 @@ import shutil
 import h5py
 import numpy as np
 
-import slurm
-import util
+import slurmrunner
 
-# from westminster.multi import collect_scores, nonzero_h5
 from baskerville_torch import utils
 from baskerville_torch.scripts.hound_snp_folds import snp_folds
 
 """
-westminster_gtex_folds.py
+westminster_sqtl_folds.py
 
-Benchmark Baskerville model replicates on GTEx eQTL classification task.
+Benchmark Baskerville model replicates on GTEx sQTL classification task.
 """
 
 
@@ -40,7 +38,7 @@ Benchmark Baskerville model replicates on GTEx eQTL classification task.
 ################################################################################
 def main():
     parser = ArgumentParser(
-        description="Compute variant effect predictions for SNPs in a VCF file using cross-fold model ensemble.",
+        description="Compute variant effect predictions for sQTL SNPs in a VCF file using cross-fold model ensemble.",
         formatter_class=ArgumentDefaultsHelpFormatter,
     )
 
@@ -62,8 +60,8 @@ def main():
     snp_group.add_argument(
         "-g",
         dest="genes_gtf",
-        default=None,
-        help="Trigger gene scoring mode; provide GTF for gene definitions (skips splitting & classifiers)",
+        default=f"{os.environ['HG38']}/genes/gencode48/gencode48_basic_nort.gtf",
+        help="GTF for gene definition (required for gene-centered sQTL scoring)",
     )
     snp_group.add_argument(
         "--head",
@@ -109,7 +107,7 @@ def main():
     snp_group.add_argument(
         "--center_gene",
         dest="center_gene",
-        default=False,
+        default=True,
         action="store_true",
         help="Center sequences on genes instead of variants (requires -g)",
     )
@@ -129,7 +127,7 @@ def main():
     snp_group.add_argument(
         "--stats",
         dest="snp_stats",
-        default="logSUM",
+        default="covgene/logFC",
         help="Comma-separated list of stats to save.",
     )
     snp_group.add_argument(
@@ -174,7 +172,7 @@ def main():
         "--local", dest="local", default=False, action="store_true", help="Run locally"
     )
     fold_group.add_argument(
-        "--name", dest="name", default="snp", help="SLURM name prefix"
+        "--name", dest="name", default="sqtl", help="SLURM name prefix"
     )
     fold_group.add_argument(
         "-p",
@@ -198,7 +196,7 @@ def main():
     )
 
     # GTEx-specific options
-    gtex_group = parser.add_argument_group("GTEx options")
+    gtex_group = parser.add_argument_group("GTEx sQTL options")
     gtex_group.add_argument(
         "--cn",
         dest="class_name",
@@ -218,12 +216,12 @@ def main():
         type=int,
         help="Random forest min_samples_leaf",
     )
-    # GTEx directory
+    # GTEx sQTL directory
     gtex_group.add_argument(
         "--gtex",
         dest="gtex_vcf_dir",
-        default="/home/drk/seqnn/data/gtex_fine/susie_pip90r",
-        help="Directory with GTEx VCF files",
+        default="/home/drk/seqnn/data/qtl_cat/sqtl_pip90",
+        help="Directory with GTEx sQTL VCF files",
     )
 
     # Positional arguments
@@ -252,8 +250,7 @@ def main():
     gtex_out_dir = args.out_dir
 
     # split SNP stats and normalize to HDF5 keys
-    # baskerville-torch stores stats with prefix: cov/, covgene/, gene/
-    # unprefixed stats like "logD2" are stored as "cov/logD2"
+    # unprefixed stats like "logD2" assume "cov/logD2"
     snp_stats = []
     for s in args.snp_stats.split(","):
         if s.startswith("covgene/") or s.startswith("gene/") or s.startswith("cov/"):
@@ -305,14 +302,10 @@ def main():
     ################################################################
     # fit classifiers
 
-    snp_stats_cov = [s for s in snp_stats if s.startswith("cov/")]
+    snp_stats_gene = [s for s in snp_stats if s.startswith("covgene/")]
 
-    # SNPs (random forest)
-    # cmd_base = "westminster_classify.py -f 8 -i 20 -n 512 -s"
-    # SNPs (xgboost)
+    # sQTL classification (xgboost)
     cmd_base = "westminster_classify.py -f 8 -i 20 -n 96 -s -x"
-    # indels
-    # cmd_base = 'westminster_classify.py -f 6 -i 64 -s'
     cmd_base += f" --msl {args.msl}"
 
     if args.class_targets_file is not None:
@@ -328,7 +321,7 @@ def main():
                 tissue = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0][:-4]
                 sad_pos = f"{it_out_dir}/{tissue}_pos/scores.h5"
                 sad_neg = f"{it_out_dir}/{tissue}_neg/scores.h5"
-                for snp_stat in snp_stats_cov:
+                for snp_stat in snp_stats_gene:
                     stat_label = snp_stat.replace("/", "-")
                     class_out_dir = f"{it_out_dir}/{tissue}_class-{stat_label}"
                     if args.class_name is not None:
@@ -339,11 +332,12 @@ def main():
                         if args.local:
                             jobs.append(cmd_class)
                         else:
-                            j = slurm.Job(
+                            j = slurmrunner.Job(
                                 cmd_class,
                                 tissue,
                                 f"{class_out_dir}.out",
                                 f"{class_out_dir}.err",
+                                f"{class_out_dir}.sb",
                                 queue="standard",
                                 cpu=2,
                                 mem=22000,
@@ -356,7 +350,7 @@ def main():
             tissue = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0][:-4]
             sad_pos = f"{ens_out_dir}/{tissue}_pos/scores.h5"
             sad_neg = f"{ens_out_dir}/{tissue}_neg/scores.h5"
-            for snp_stat in snp_stats_cov:
+            for snp_stat in snp_stats_gene:
                 stat_label = snp_stat.replace("/", "-")
                 class_out_dir = f"{ens_out_dir}/{tissue}_class-{stat_label}"
                 if args.class_name is not None:
@@ -367,11 +361,12 @@ def main():
                     if args.local:
                         jobs.append(cmd_class)
                     else:
-                        j = slurm.Job(
+                        j = slurmrunner.Job(
                             cmd_class,
                             tissue,
                             f"{class_out_dir}.out",
                             f"{class_out_dir}.err",
+                            f"{class_out_dir}.sb",
                             queue="standard",
                             cpu=2,
                             mem=22000,
@@ -380,9 +375,9 @@ def main():
                         jobs.append(j)
 
         if args.local:
-            util.exec_par(jobs, 3, verbose=True)
+            utils.exec_par(jobs, 3, verbose=True)
         else:
-            slurm.multi_run(jobs, verbose=True)
+            slurmrunner.multi_run(jobs, verbose=True)
 
     ################################################################
     # coefficient analysis
@@ -396,10 +391,7 @@ def main():
                 stat_label = snp_stat.replace("/", "-")
                 coef_out_dir = f"{it_out_dir}/coef-{stat_label}"
 
-                if snp_stat.startswith("cov/"):
-                    cmd_coef = f"westminster_gtex_coef.py -g {args.gtex_vcf_dir}"
-                else:
-                    cmd_coef = f"westminster_gtexg_coef.py -g {args.gtex_vcf_dir}"
+                cmd_coef = f"westminster_sqtl_gtex.py -g {args.gtex_vcf_dir}"
                 cmd_coef += f" -o {coef_out_dir}"
                 cmd_coef += f" -s {snp_stat}"
                 cmd_coef += f" {it_out_dir}"
@@ -407,11 +399,12 @@ def main():
                 if args.local:
                     jobs.append(cmd_coef)
                 else:
-                    j = slurm.Job(
+                    j = slurmrunner.Job(
                         cmd_coef,
                         "coef",
                         f"{coef_out_dir}.out",
                         f"{coef_out_dir}.err",
+                        f"{coef_out_dir}.sb",
                         queue="standard",
                         cpu=2,
                         mem=22000,
@@ -424,10 +417,7 @@ def main():
         stat_label = snp_stat.replace("/", "-")
         coef_out_dir = f"{ens_out_dir}/coef-{stat_label}"
 
-        if snp_stat.startswith("cov/"):
-            cmd_coef = f"westminster_gtex_coef.py -g {args.gtex_vcf_dir}"
-        else:
-            cmd_coef = f"westminster_gtexg_coef.py -g {args.gtex_vcf_dir}"
+        cmd_coef = f"westminster_sqtl_gtex.py -g {args.gtex_vcf_dir}"
         cmd_coef += f" -o {coef_out_dir}"
         cmd_coef += f" -s {snp_stat}"
         cmd_coef += f" {ens_out_dir}"
@@ -435,11 +425,12 @@ def main():
         if args.local:
             jobs.append(cmd_coef)
         else:
-            j = slurm.Job(
+            j = slurmrunner.Job(
                 cmd_coef,
                 "coef",
                 f"{coef_out_dir}.out",
                 f"{coef_out_dir}.err",
+                f"{coef_out_dir}.sb",
                 queue="standard",
                 cpu=2,
                 mem=22000,
@@ -448,9 +439,9 @@ def main():
             jobs.append(j)
 
     if args.local:
-        util.exec_par(jobs, 3, verbose=True)
+        utils.exec_par(jobs, 3, verbose=True)
     else:
-        slurm.multi_run(jobs, verbose=True)
+        slurmrunner.multi_run(jobs, verbose=True)
 
 
 def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):

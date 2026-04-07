@@ -15,7 +15,7 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from westminster.gtex import match_tissue_targets, tissue_keywords, vcf_tss_dist
 
 """
-westminster_gtex_coef.py
+westminster_eqtl_gtex.py
 
 Evaluate concordance of variant effect prediction sign classifcation
 and coefficient correlations.

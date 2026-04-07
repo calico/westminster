@@ -19,7 +19,7 @@ from westminster.gtex import (
 )
 
 """
-westminster_gtexg_coef.py
+westminster_eqtl_gtexg.py
 
 Evaluate concordance of variant effect prediction sign classifcation
 and coefficient correlations.
