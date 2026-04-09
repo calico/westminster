@@ -107,7 +107,7 @@ def main():
     snp_group.add_argument(
         "--center_gene",
         dest="center_gene",
-        default=True,
+        default=False,
         action="store_true",
         help="Center sequences on genes instead of variants (requires -g)",
     )
