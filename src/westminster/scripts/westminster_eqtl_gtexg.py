@@ -61,6 +61,8 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
 
+    gene_tss = read_gene_tss(args.genes_bed_file)
+
     metrics_rows = []
 
     for tissue, keyword in tissue_keywords.items():
@@ -145,14 +147,21 @@ def main():
             ]
             neg_tss_map = dict(zip(neg_vcf_variants, neg_tss_arr))
 
+            # compute eQTL-gene TSS distances before grouping
+            eqtl_df["tss_dist_eqtl"] = compute_eqtl_tss_dist(eqtl_df, gene_tss)
+
             # write combined variant table
             pos_var_df = (
                 eqtl_df.groupby("variant", sort=False)
-                .agg(coef=("coef", "mean"))
+                .agg(
+                    coef=("coef", "mean"),
+                    pred=("score", "mean"),
+                    tss_dist_eqtl=("tss_dist_eqtl", "min"),
+                )
                 .reset_index()
             )
             pos_var_df = pos_var_df[pos_var_df.variant.isin(pos_tss_map)]
-            pos_var_df["pred"] = [psnp_scores.get(v, 0.0) for v in pos_var_df.variant]
+            pos_var_df["pred_agg"] = [psnp_scores.get(v, 0.0) for v in pos_var_df.variant]
             pos_var_df["tss_dist"] = [pos_tss_map[v] for v in pos_var_df.variant]
             pos_var_df["label"] = "pos"
 
@@ -162,14 +171,17 @@ def main():
                     "variant": neg_variants,
                     "label": "neg",
                     "coef": np.nan,
-                    "pred": [nsnp_scores[v] for v in neg_variants],
+                    "pred": np.nan,
+                    "pred_agg": [nsnp_scores[v] for v in neg_variants],
                     "tss_dist": [neg_tss_map[v] for v in neg_variants],
+                    "tss_dist_eqtl": np.nan,
                 }
             )
 
+            scatter_cols = ["variant", "label", "coef", "pred", "pred_agg", "tss_dist", "tss_dist_eqtl"]
             scatter_df = pd.concat(
                 [
-                    pos_var_df[["variant", "label", "coef", "pred", "tss_dist"]],
+                    pos_var_df[scatter_cols],
                     neg_var_df,
                 ],
                 ignore_index=True,
@@ -217,6 +229,56 @@ def main():
     print("Measured SpearmanR:   %.4f" % np.mean(metrics_df.measured_spearmanr))
     print("Measured Class AUROC: %.4f" % np.mean(metrics_df.measured_auroc_class))
     print("Measured Class AUPRC: %.4f" % np.mean(metrics_df.measured_auprc_class))
+
+
+def read_gene_tss(genes_bed_file: str):
+    """Build a lookup from trimmed gene ID to TSS position.
+
+    Args:
+        genes_bed_file: BED file with gene TSS positions.
+            Column 3 format: ENST.../ENSG.../SYMBOL
+
+    Returns:
+        Dictionary mapping trimmed ENSG ID to (chrom, tss_pos).
+    """
+    gene_tss = {}
+    for line in open(genes_bed_file):
+        fields = line.strip().split("\t")
+        chrom = fields[0]
+        tss_pos = (int(fields[1]) + int(fields[2])) // 2
+        name = fields[3]
+        ensg = name.split("/")[1]
+        ensg_trim = trim_dot(ensg)
+        if ensg_trim not in gene_tss:
+            gene_tss[ensg_trim] = (chrom, tss_pos)
+    return gene_tss
+
+
+def variant_pos(variant_id: str):
+    """Parse chromosome and position from variant ID (e.g. chr1_13550_G_A_b38)."""
+    parts = variant_id.split("_")
+    return parts[0], int(parts[1])
+
+
+def compute_eqtl_tss_dist(eqtl_df: pd.DataFrame, gene_tss: dict):
+    """Compute distance from each variant to its eQTL gene's TSS.
+
+    Args:
+        eqtl_df: DataFrame with 'variant' and 'gene' columns.
+        gene_tss: Dictionary from read_gene_tss().
+
+    Returns:
+        Series of distances, aligned with eqtl_df index.
+    """
+    dists = []
+    for _, row in eqtl_df.iterrows():
+        v_chrom, v_pos = variant_pos(row.variant)
+        gene_info = gene_tss.get(row.gene)
+        if gene_info is not None and gene_info[0] == v_chrom:
+            dists.append(abs(v_pos - gene_info[1]))
+        else:
+            dists.append(np.nan)
+    return dists
 
 
 def read_eqtl(tissue: str, gtex_vcf_dir: str, pip_t: float = 0.9):
