@@ -24,12 +24,6 @@ matching model targets to GTEx tissues for per-tissue AUROC/AUPRC.
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "-g",
-        "--gtex_vcf_dir",
-        default="/home/drk/seqnn/data/qtl_cat/sqtl_pip90",
-        help="sQTL VCF directory",
-    )
-    parser.add_argument(
         "-o",
         "--out_dir",
         default="gtex_out",
@@ -57,16 +51,16 @@ def main():
         if not os.path.isfile(pos_scores_file):
             continue
 
+        neg_scores_file = pos_scores_file.replace("_pos/", "_neg/")
+        if not os.path.isfile(neg_scores_file):
+            continue
+
         try:
-            _match_tissue_targets(pos_scores_file, keyword, args.snp_stat, args.verbose)
+            psnp_scores, _ = read_snp_scores(pos_scores_file, keyword, args.snp_stat)
+            nsnp_scores, _ = read_snp_scores(neg_scores_file, keyword, args.snp_stat)
         except ValueError:
             print(f"Skipping {tissue}: no matching targets.", file=sys.stderr)
             continue
-
-        psnp_scores, _ = read_snp_scores(pos_scores_file, keyword, args.snp_stat)
-
-        neg_scores_file = pos_scores_file.replace("_pos/", "_neg/")
-        nsnp_scores, _ = read_snp_scores(neg_scores_file, keyword, args.snp_stat)
 
         Xp = list(psnp_scores.values())
         Xn = list(nsnp_scores.values())

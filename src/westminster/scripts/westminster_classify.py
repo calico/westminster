@@ -180,7 +180,9 @@ def main():
 
     # train classifier
     if X.shape[1] == 1:
-        aurocs, fpr_folds, tpr_folds, fpr_mean, tpr_mean = folds_single(X, y, folds=8)
+        aurocs, auprcs, fpr_folds, tpr_folds, fpr_mean, tpr_mean = folds_single(
+            X, y, folds=8
+        )
 
         # save preds
         if options.save_preds:
@@ -198,14 +200,16 @@ def main():
                 random_state=options.random_seed,
             )
         else:
-            aurocs, fpr_folds, tpr_folds, fpr_mean, tpr_mean, preds = folds_randfor(
-                X,
-                y,
-                folds=options.num_folds,
-                iterations=options.iterations,
-                n_estimators=options.n_estimators,
-                min_samples_leaf=options.msl,
-                random_state=options.random_seed,
+            aurocs, auprcs, fpr_folds, tpr_folds, fpr_mean, tpr_mean, preds = (
+                folds_randfor(
+                    X,
+                    y,
+                    folds=options.num_folds,
+                    iterations=options.iterations,
+                    n_estimators=options.n_estimators,
+                    min_samples_leaf=options.msl,
+                    random_state=options.random_seed,
+                )
             )
 
         # save preds
