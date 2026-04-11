@@ -34,7 +34,7 @@ def main():
     parser.add_argument(
         "-b",
         "--genes_bed_file",
-        default=f"{os.environ['HG38']}/genes/gencode48/gencode48_basic_protein_tss2.bed",
+        default=f"{os.environ['HG38']}/genes/gencode48/gencode48_basic_tss2.bed",
         help="BED file of gene TSS positions, for computing variant distance to TSS",
     )
     parser.add_argument(
@@ -161,7 +161,9 @@ def main():
                 .reset_index()
             )
             pos_var_df = pos_var_df[pos_var_df.variant.isin(pos_tss_map)]
-            pos_var_df["pred_agg"] = [psnp_scores.get(v, 0.0) for v in pos_var_df.variant]
+            pos_var_df["pred_agg"] = [
+                psnp_scores.get(v, 0.0) for v in pos_var_df.variant
+            ]
             pos_var_df["tss_dist"] = [pos_tss_map[v] for v in pos_var_df.variant]
             pos_var_df["label"] = "pos"
 
@@ -178,7 +180,15 @@ def main():
                 }
             )
 
-            scatter_cols = ["variant", "label", "coef", "pred", "pred_agg", "tss_dist", "tss_dist_eqtl"]
+            scatter_cols = [
+                "variant",
+                "label",
+                "coef",
+                "pred",
+                "pred_agg",
+                "tss_dist",
+                "tss_dist_eqtl",
+            ]
             scatter_df = pd.concat(
                 [
                     pos_var_df[scatter_cols],
