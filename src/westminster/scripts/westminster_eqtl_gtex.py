@@ -10,12 +10,12 @@ import numpy as np
 import pandas as pd
 import pybedtools
 from scipy.stats import spearmanr
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import average_precision_score, roc_auc_score
 
 from westminster.gtex import match_tissue_targets, tissue_keywords, vcf_tss_dist
 
 """
-westminster_gtex_coef.py
+westminster_eqtl_gtex.py
 
 Evaluate concordance of variant effect prediction sign classifcation
 and coefficient correlations.
@@ -94,6 +94,7 @@ def main():
             variant_sign = eqtl_df[eqtl_df.consistent].sign
             cvariant_scores = variant_scores[eqtl_df.consistent]
             sign_auroc = roc_auc_score(variant_sign, cvariant_scores)
+            sign_auprc = average_precision_score(variant_sign, cvariant_scores)
 
             # compute SpearmanR
             variant_coef = eqtl_df[eqtl_df.consistent].coef
@@ -114,10 +115,12 @@ def main():
             # classification AUROC
             pos_abs = np.abs(variant_scores)
             neg_abs = np.abs(neg_scores)
-            class_auroc = roc_auc_score(
-                np.concatenate([np.ones(len(pos_abs)), np.zeros(len(neg_abs))]),
-                np.concatenate([pos_abs, neg_abs]),
+            class_labels = np.concatenate(
+                [np.ones(len(pos_abs)), np.zeros(len(neg_abs))]
             )
+            class_scores = np.concatenate([pos_abs, neg_abs])
+            class_auroc = roc_auc_score(class_labels, class_scores)
+            class_auprc = average_precision_score(class_labels, class_scores)
 
             # write combined variant table
             pos_df = pd.DataFrame(
@@ -147,8 +150,10 @@ def main():
                     "tissue": tissue,
                     "variants": eqtl_df.shape[0],
                     "auroc_sign": sign_auroc,
+                    "auprc_sign": sign_auprc,
                     "spearmanr": coef_r,
                     "auroc_class": class_auroc,
+                    "auprc_class": class_auprc,
                 }
             )
 
@@ -165,8 +170,10 @@ def main():
 
     # summarize
     print("Sign AUROC:  %.4f" % np.mean(metrics_df.auroc_sign))
+    print("Sign AUPRC:  %.4f" % np.mean(metrics_df.auprc_sign))
     print("SpearmanR:   %.4f" % np.mean(metrics_df.spearmanr))
     print("Class AUROC: %.4f" % np.mean(metrics_df.auroc_class))
+    print("Class AUPRC: %.4f" % np.mean(metrics_df.auprc_class))
 
 
 def read_eqtl(tissue: str, tissue_vcf_file: str, pip_t: float = 0.9):

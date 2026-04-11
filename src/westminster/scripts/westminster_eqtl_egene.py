@@ -8,7 +8,7 @@ import argparse
 from westminster import gtf
 
 """
-westminster_gtex_egene.py
+westminster_eqtl_egene.py
 
 Benchmark a Baskerville model on the GTEx eGene prioritization task.
 """

@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pybedtools
 from scipy.stats import spearmanr
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import average_precision_score, roc_auc_score
 
 from westminster.gtex import (
     match_tissue_targets,
@@ -19,7 +19,7 @@ from westminster.gtex import (
 )
 
 """
-westminster_gtexg_coef.py
+westminster_eqtl_gtexg.py
 
 Evaluate concordance of variant effect prediction sign classifcation
 and coefficient correlations.
@@ -34,7 +34,7 @@ def main():
     parser.add_argument(
         "-b",
         "--genes_bed_file",
-        default=f"{os.environ['HG38']}/genes/gencode48/gencode48_basic_protein_tss2.bed",
+        default=f"{os.environ['HG38']}/genes/gencode48/gencode48_basic_tss2.bed",
         help="BED file of gene TSS positions, for computing variant distance to TSS",
     )
     parser.add_argument(
@@ -61,6 +61,8 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
 
+    gene_tss = read_gene_tss(args.genes_bed_file)
+
     metrics_rows = []
 
     for tissue, keyword in tissue_keywords.items():
@@ -84,8 +86,9 @@ def main():
                 print(f"Skipping {tissue} due to missing targets.", file=sys.stderr)
                 continue
 
-            # sign AUROC
+            # sign AUROC/AUPRC
             sign_auroc = roc_auc_score(eqtl_df.coef > 0, eqtl_df.score)
+            sign_auprc = average_precision_score(eqtl_df.coef > 0, eqtl_df.score)
 
             # SpearmanR
             coef_r = spearmanr(eqtl_df.coef, eqtl_df.score)[0]
@@ -94,6 +97,9 @@ def main():
             meas_frac = np.mean(eqtl_df.measured)
             eqtl_meas_df = eqtl_df[eqtl_df.measured]
             sign_auroc_meas = roc_auc_score(eqtl_meas_df.coef > 0, eqtl_meas_df.score)
+            sign_auprc_meas = average_precision_score(
+                eqtl_meas_df.coef > 0, eqtl_meas_df.score
+            )
             coef_r_meas = spearmanr(eqtl_meas_df.coef, eqtl_meas_df.score)[0]
 
             # read pos+neg per-SNP aggregated scores
@@ -106,14 +112,20 @@ def main():
             # classification AUROC
             Xp = list(psnp_scores.values())
             Xn = list(nsnp_scores.values())
-            class_auroc = roc_auc_score([1] * len(Xp) + [0] * len(Xn), Xp + Xn)
+            class_labels = [1] * len(Xp) + [0] * len(Xn)
+            class_scores = Xp + Xn
+            class_auroc = roc_auc_score(class_labels, class_scores)
+            class_auprc = average_precision_score(class_labels, class_scores)
 
             # measured classification AUROC
             measured_snps = set(eqtl_meas_df.variant)
             Xp_m = [v for s, v in psnp_scores.items() if s in measured_snps]
             Xn_m = [v for s, v in nsnp_scores.items() if s in neg_scored_snps]
-            class_auroc_meas = roc_auc_score(
-                [1] * len(Xp_m) + [0] * len(Xn_m), Xp_m + Xn_m
+            class_labels_meas = [1] * len(Xp_m) + [0] * len(Xn_m)
+            class_scores_meas = Xp_m + Xn_m
+            class_auroc_meas = roc_auc_score(class_labels_meas, class_scores_meas)
+            class_auprc_meas = average_precision_score(
+                class_labels_meas, class_scores_meas
             )
 
             # compute TSS distances (dict-based: eqtl_df order != VCF order)
@@ -135,14 +147,23 @@ def main():
             ]
             neg_tss_map = dict(zip(neg_vcf_variants, neg_tss_arr))
 
+            # compute eQTL-gene TSS distances before grouping
+            eqtl_df["tss_dist_eqtl"] = compute_eqtl_tss_dist(eqtl_df, gene_tss)
+
             # write combined variant table
             pos_var_df = (
                 eqtl_df.groupby("variant", sort=False)
-                .agg(coef=("coef", "mean"))
+                .agg(
+                    coef=("coef", "mean"),
+                    pred=("score", "mean"),
+                    tss_dist_eqtl=("tss_dist_eqtl", "min"),
+                )
                 .reset_index()
             )
             pos_var_df = pos_var_df[pos_var_df.variant.isin(pos_tss_map)]
-            pos_var_df["pred"] = [psnp_scores.get(v, 0.0) for v in pos_var_df.variant]
+            pos_var_df["pred_agg"] = [
+                psnp_scores.get(v, 0.0) for v in pos_var_df.variant
+            ]
             pos_var_df["tss_dist"] = [pos_tss_map[v] for v in pos_var_df.variant]
             pos_var_df["label"] = "pos"
 
@@ -152,14 +173,25 @@ def main():
                     "variant": neg_variants,
                     "label": "neg",
                     "coef": np.nan,
-                    "pred": [nsnp_scores[v] for v in neg_variants],
+                    "pred": np.nan,
+                    "pred_agg": [nsnp_scores[v] for v in neg_variants],
                     "tss_dist": [neg_tss_map[v] for v in neg_variants],
+                    "tss_dist_eqtl": np.nan,
                 }
             )
 
+            scatter_cols = [
+                "variant",
+                "label",
+                "coef",
+                "pred",
+                "pred_agg",
+                "tss_dist",
+                "tss_dist_eqtl",
+            ]
             scatter_df = pd.concat(
                 [
-                    pos_var_df[["variant", "label", "coef", "pred", "tss_dist"]],
+                    pos_var_df[scatter_cols],
                     neg_var_df,
                 ],
                 ignore_index=True,
@@ -171,12 +203,16 @@ def main():
                 {
                     "tissue": tissue,
                     "auroc_sign": sign_auroc,
+                    "auprc_sign": sign_auprc,
                     "spearmanr": coef_r,
                     "auroc_class": class_auroc,
+                    "auprc_class": class_auprc,
                     "measured": meas_frac,
                     "measured_auroc_sign": sign_auroc_meas,
+                    "measured_auprc_sign": sign_auprc_meas,
                     "measured_spearmanr": coef_r_meas,
                     "measured_auroc_class": class_auroc_meas,
+                    "measured_auprc_class": class_auprc_meas,
                 }
             )
 
@@ -193,12 +229,66 @@ def main():
 
     # summarize
     print("Sign AUROC:  %.4f" % np.mean(metrics_df.auroc_sign))
+    print("Sign AUPRC:  %.4f" % np.mean(metrics_df.auprc_sign))
     print("SpearmanR:   %.4f" % np.mean(metrics_df.spearmanr))
     print("Class AUROC: %.4f" % np.mean(metrics_df.auroc_class))
+    print("Class AUPRC: %.4f" % np.mean(metrics_df.auprc_class))
     print("Measured fraction: %.4f" % np.mean(metrics_df.measured))
     print("Measured Sign AUROC:  %.4f" % np.mean(metrics_df.measured_auroc_sign))
+    print("Measured Sign AUPRC:  %.4f" % np.mean(metrics_df.measured_auprc_sign))
     print("Measured SpearmanR:   %.4f" % np.mean(metrics_df.measured_spearmanr))
     print("Measured Class AUROC: %.4f" % np.mean(metrics_df.measured_auroc_class))
+    print("Measured Class AUPRC: %.4f" % np.mean(metrics_df.measured_auprc_class))
+
+
+def read_gene_tss(genes_bed_file: str):
+    """Build a lookup from trimmed gene ID to TSS position.
+
+    Args:
+        genes_bed_file: BED file with gene TSS positions.
+            Column 3 format: ENST.../ENSG.../SYMBOL
+
+    Returns:
+        Dictionary mapping trimmed ENSG ID to (chrom, tss_pos).
+    """
+    gene_tss = {}
+    for line in open(genes_bed_file):
+        fields = line.strip().split("\t")
+        chrom = fields[0]
+        tss_pos = (int(fields[1]) + int(fields[2])) // 2
+        name = fields[3]
+        ensg = name.split("/")[1]
+        ensg_trim = trim_dot(ensg)
+        if ensg_trim not in gene_tss:
+            gene_tss[ensg_trim] = (chrom, tss_pos)
+    return gene_tss
+
+
+def variant_pos(variant_id: str):
+    """Parse chromosome and position from variant ID (e.g. chr1_13550_G_A_b38)."""
+    parts = variant_id.split("_")
+    return parts[0], int(parts[1])
+
+
+def compute_eqtl_tss_dist(eqtl_df: pd.DataFrame, gene_tss: dict):
+    """Compute distance from each variant to its eQTL gene's TSS.
+
+    Args:
+        eqtl_df: DataFrame with 'variant' and 'gene' columns.
+        gene_tss: Dictionary from read_gene_tss().
+
+    Returns:
+        Series of distances, aligned with eqtl_df index.
+    """
+    dists = []
+    for _, row in eqtl_df.iterrows():
+        v_chrom, v_pos = variant_pos(row.variant)
+        gene_info = gene_tss.get(row.gene)
+        if gene_info is not None and gene_info[0] == v_chrom:
+            dists.append(abs(v_pos - gene_info[1]))
+        else:
+            dists.append(np.nan)
+    return dists
 
 
 def read_eqtl(tissue: str, gtex_vcf_dir: str, pip_t: float = 0.9):

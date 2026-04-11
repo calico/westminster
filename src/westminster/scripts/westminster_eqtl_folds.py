@@ -21,15 +21,14 @@ import shutil
 import h5py
 import numpy as np
 
-import slurm
-import util
+import slurmrunner
 
 # from westminster.multi import collect_scores, nonzero_h5
 from baskerville_torch import utils
 from baskerville_torch.scripts.hound_snp_folds import snp_folds
 
 """
-westminster_gtex_folds.py
+westminster_eqtl_folds.py
 
 Benchmark Baskerville model replicates on GTEx eQTL classification task.
 """
@@ -218,6 +217,12 @@ def main():
         type=int,
         help="Random forest min_samples_leaf",
     )
+    gtex_group.add_argument(
+        "--metrics_only",
+        default=False,
+        action="store_true",
+        help="Skip SNP scoring, splitting, and classifiers; only run coefficient/metrics analysis",
+    )
     # GTEx directory
     gtex_group.add_argument(
         "--gtex",
@@ -250,6 +255,7 @@ def main():
 
     # extract output subdirectory name
     gtex_out_dir = args.out_dir
+    ens_out_dir = f"{args.models_dir}/ensemble/{gtex_out_dir}"
 
     # split SNP stats and normalize to HDF5 keys
     # baskerville-torch stores stats with prefix: cov/, covgene/, gene/
@@ -261,46 +267,46 @@ def main():
         else:
             snp_stats.append(f"cov/{s}")
 
-    ################################################################
-    # score SNPs
+    if not args.metrics_only:
+        ################################################################
+        # score SNPs
 
-    # merge study/tissue variants
-    mpos_vcf_file = f"{args.gtex_vcf_dir}/pos_merge.vcf"
-    mneg_vcf_file = f"{args.gtex_vcf_dir}/neg_merge.vcf"
+        # merge study/tissue variants
+        mpos_vcf_file = f"{args.gtex_vcf_dir}/pos_merge.vcf"
+        mneg_vcf_file = f"{args.gtex_vcf_dir}/neg_merge.vcf"
 
-    # embed output in the models directory
-    args.embed = True
+        # embed output in the models directory
+        args.embed = True
 
-    # score negative SNPs
-    args.vcf_file = mneg_vcf_file
-    args.out_dir = f"{gtex_out_dir}/merge_neg"
-    snp_folds(args)
+        # score negative SNPs
+        args.vcf_file = mneg_vcf_file
+        args.out_dir = f"{gtex_out_dir}/merge_neg"
+        snp_folds(args)
 
-    # score positive SNPs
-    args.vcf_file = mpos_vcf_file
-    args.out_dir = f"{gtex_out_dir}/merge_pos"
-    snp_folds(args)
+        # score positive SNPs
+        args.vcf_file = mpos_vcf_file
+        args.out_dir = f"{gtex_out_dir}/merge_pos"
+        snp_folds(args)
 
-    ################################################################
-    # split study/tissue variants
+        ################################################################
+        # split study/tissue variants
 
-    for ci in range(args.crosses):
-        for fi in fold_index:
-            it_out_dir = f"{args.models_dir}/f{fi}c{ci}/{gtex_out_dir}"
-            print(it_out_dir)
+        for ci in range(args.crosses):
+            for fi in fold_index:
+                it_out_dir = f"{args.models_dir}/f{fi}c{ci}/{gtex_out_dir}"
+                print(it_out_dir)
 
-            # split positives
-            split_scores(it_out_dir, "pos", args.gtex_vcf_dir, snp_stats)
+                # split positives
+                split_scores(it_out_dir, "pos", args.gtex_vcf_dir, snp_stats)
 
-            # split negatives
-            split_scores(it_out_dir, "neg", args.gtex_vcf_dir, snp_stats)
+                # split negatives
+                split_scores(it_out_dir, "neg", args.gtex_vcf_dir, snp_stats)
 
-    # split ensemble positives
-    ens_out_dir = f"{args.models_dir}/ensemble/{gtex_out_dir}"
-    split_scores(ens_out_dir, "pos", args.gtex_vcf_dir, snp_stats)
+        # split ensemble positives
+        split_scores(ens_out_dir, "pos", args.gtex_vcf_dir, snp_stats)
 
-    # split ensemble negatives
-    split_scores(ens_out_dir, "neg", args.gtex_vcf_dir, snp_stats)
+        # split ensemble negatives
+        split_scores(ens_out_dir, "neg", args.gtex_vcf_dir, snp_stats)
 
     ################################################################
     # fit classifiers
@@ -339,7 +345,7 @@ def main():
                         if args.local:
                             jobs.append(cmd_class)
                         else:
-                            j = slurm.Job(
+                            j = slurmrunner.Job(
                                 cmd_class,
                                 tissue,
                                 f"{class_out_dir}.out",
@@ -367,7 +373,7 @@ def main():
                     if args.local:
                         jobs.append(cmd_class)
                     else:
-                        j = slurm.Job(
+                        j = slurmrunner.Job(
                             cmd_class,
                             tissue,
                             f"{class_out_dir}.out",
@@ -380,9 +386,9 @@ def main():
                         jobs.append(j)
 
         if args.local:
-            util.exec_par(jobs, 3, verbose=True)
+            utils.exec_par(jobs, 3, verbose=True)
         else:
-            slurm.multi_run(jobs, verbose=True)
+            slurmrunner.multi_run(jobs, verbose=True)
 
     ################################################################
     # coefficient analysis
@@ -396,61 +402,63 @@ def main():
                 stat_label = snp_stat.replace("/", "-")
                 coef_out_dir = f"{it_out_dir}/coef-{stat_label}"
 
-                if snp_stat.startswith("cov/"):
-                    cmd_coef = f"westminster_gtex_coef.py -g {args.gtex_vcf_dir}"
-                else:
-                    cmd_coef = f"westminster_gtexg_coef.py -g {args.gtex_vcf_dir}"
-                cmd_coef += f" -o {coef_out_dir}"
-                cmd_coef += f" -s {snp_stat}"
-                cmd_coef += f" {it_out_dir}"
+                if not os.path.isfile(f"{coef_out_dir}/metrics.tsv"):
+                    if snp_stat.startswith("cov/"):
+                        cmd_coef = f"westminster_eqtl_gtex.py -g {args.gtex_vcf_dir}"
+                    else:
+                        cmd_coef = f"westminster_eqtl_gtexg.py -g {args.gtex_vcf_dir}"
+                    cmd_coef += f" -o {coef_out_dir}"
+                    cmd_coef += f" -s {snp_stat}"
+                    cmd_coef += f" {it_out_dir}"
 
-                if args.local:
-                    jobs.append(cmd_coef)
-                else:
-                    j = slurm.Job(
-                        cmd_coef,
-                        "coef",
-                        f"{coef_out_dir}.out",
-                        f"{coef_out_dir}.err",
-                        queue="standard",
-                        cpu=2,
-                        mem=22000,
-                        time="12:0:0",
-                    )
-                    jobs.append(j)
+                    if args.local:
+                        jobs.append(cmd_coef)
+                    else:
+                        j = slurmrunner.Job(
+                            cmd_coef,
+                            "coef",
+                            f"{coef_out_dir}.out",
+                            f"{coef_out_dir}.err",
+                            queue="standard",
+                            cpu=2,
+                            mem=22000,
+                            time="12:0:0",
+                        )
+                        jobs.append(j)
 
     # ensemble
     for snp_stat in snp_stats:
         stat_label = snp_stat.replace("/", "-")
         coef_out_dir = f"{ens_out_dir}/coef-{stat_label}"
 
-        if snp_stat.startswith("cov/"):
-            cmd_coef = f"westminster_gtex_coef.py -g {args.gtex_vcf_dir}"
-        else:
-            cmd_coef = f"westminster_gtexg_coef.py -g {args.gtex_vcf_dir}"
-        cmd_coef += f" -o {coef_out_dir}"
-        cmd_coef += f" -s {snp_stat}"
-        cmd_coef += f" {ens_out_dir}"
+        if not os.path.isfile(f"{coef_out_dir}/metrics.tsv"):
+            if snp_stat.startswith("cov/"):
+                cmd_coef = f"westminster_eqtl_gtex.py -g {args.gtex_vcf_dir}"
+            else:
+                cmd_coef = f"westminster_eqtl_gtexg.py -g {args.gtex_vcf_dir}"
+            cmd_coef += f" -o {coef_out_dir}"
+            cmd_coef += f" -s {snp_stat}"
+            cmd_coef += f" {ens_out_dir}"
 
-        if args.local:
-            jobs.append(cmd_coef)
-        else:
-            j = slurm.Job(
-                cmd_coef,
-                "coef",
-                f"{coef_out_dir}.out",
-                f"{coef_out_dir}.err",
-                queue="standard",
-                cpu=2,
-                mem=22000,
-                time="12:0:0",
-            )
-            jobs.append(j)
+            if args.local:
+                jobs.append(cmd_coef)
+            else:
+                j = slurmrunner.Job(
+                    cmd_coef,
+                    "coef",
+                    f"{coef_out_dir}.out",
+                    f"{coef_out_dir}.err",
+                    queue="standard",
+                    cpu=2,
+                    mem=22000,
+                    time="12:0:0",
+                )
+                jobs.append(j)
 
     if args.local:
-        util.exec_par(jobs, 3, verbose=True)
+        utils.exec_par(jobs, 3, verbose=True)
     else:
-        slurm.multi_run(jobs, verbose=True)
+        slurmrunner.multi_run(jobs, verbose=True)
 
 
 def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):

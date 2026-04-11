@@ -29,7 +29,7 @@ import baskerville_torch.utils as utils
 from baskerville_torch.scripts.hound_snp_folds import snp_folds
 
 """
-westminster_gtexg_folds.py
+westminster_eqtlg_folds.py
 
 Benchmark Baskerville model replicates on GTEx eQTL coefficient task.
 """
@@ -62,7 +62,7 @@ def main():
     snp_group.add_argument(
         "-g",
         dest="genes_gtf",
-        default=f"{os.environ['HG38']}/genes/gencode41/gencode41_basic_nort.gtf",
+        default=f"{os.environ['HG38']}/genes/gencode48/gencode48_basic_nort.gtf",
         help="Trigger gene scoring mode, and provide GTF for gene definition",
     )
     snp_group.add_argument(
@@ -448,7 +448,7 @@ def main():
     ################################################################
     # coefficient analysis
 
-    cmd_base = "westminster_gtexg_coef.py -g %s" % options.gtex_vcf_dir
+    cmd_base = "westminster_eqtl_gtexg.py -g %s" % options.gtex_vcf_dir
 
     jobs = []
     for ci in range(options.crosses):

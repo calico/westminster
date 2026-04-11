@@ -35,7 +35,7 @@ def test_classify():
     # run classify
 
     cmd = "westminster_classify.py %s %s" % (pos_h5f, neg_h5f)
-    cmd += " -o %s" % out_dir
+    cmd += " -o %s --stat SAD" % out_dir
     subprocess.call(cmd, shell=True)
 
     # check auroc
