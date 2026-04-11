@@ -11,9 +11,9 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from westminster.gtex import match_tissue_targets, txrev_keywords
 
 """
-westminster_sqtl_gtex.py
+westminster_paqtl_gtex.py
 
-Evaluate variant effect prediction accuracy on GTEx sQTL classification task,
+Evaluate variant effect prediction accuracy on GTEx paQTL classification task,
 matching model targets to GTEx tissues for per-tissue AUROC/AUPRC.
 """
 
@@ -26,8 +26,8 @@ def main():
     parser.add_argument(
         "-g",
         "--gtex_vcf_dir",
-        default="/home/drk/seqnn/data/qtl_cat/sqtl_pip90",
-        help="sQTL VCF directory",
+        default="/home/drk/seqnn/data/qtl_cat/paqtl_pip90",
+        help="paQTL VCF directory",
     )
     parser.add_argument(
         "-o",
@@ -38,11 +38,11 @@ def main():
     parser.add_argument(
         "-s",
         "--snp_stat",
-        default="covgene/logSUM",
+        default="covgene/JSD",
         help="SNP statistic. [Default: %(default)s]",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
-    parser.add_argument("sqtl_dir")
+    parser.add_argument("paqtl_dir")
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -53,7 +53,7 @@ def main():
         if args.verbose:
             print(tissue)
 
-        pos_scores_file = f"{args.sqtl_dir}/{tissue}_pos/scores.h5"
+        pos_scores_file = f"{args.paqtl_dir}/{tissue}_pos/scores.h5"
         if not os.path.isfile(pos_scores_file):
             continue
 
@@ -94,7 +94,7 @@ def main():
 def _match_tissue_targets(
     scores_file: str,
     keyword: str,
-    score_key: str = "covgene/logSUM",
+    score_key: str = "covgene/JSD",
     verbose: bool = False,
 ):
     """Read targets file and match tissue targets."""
@@ -159,7 +159,7 @@ def _aggregate_scores_across_genes(data: dict, match_tis: np.ndarray):
     return snp_scores, scored_snps
 
 
-def read_snp_scores(scores_file, keyword, score_key="covgene/logSUM"):
+def read_snp_scores(scores_file, keyword, score_key="covgene/JSD"):
     """Return per-SNP aggregated absolute scores from gene-level HDF5."""
     match_tis = _match_tissue_targets(scores_file, keyword, score_key)
     data = _load_hdf5_data(scores_file, score_key)

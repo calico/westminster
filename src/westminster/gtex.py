@@ -30,7 +30,7 @@ tissue_keywords = {
     "Whole_Blood": "blood",
 }
 
-sqtl_keywords = {
+txrev_keywords = {
     "GTEx_txrev_LCL": "lcl",
     "GTEx_txrev_adipose_subcutaneous": "adipose",
     "GTEx_txrev_adipose_visceral": "adipose",
