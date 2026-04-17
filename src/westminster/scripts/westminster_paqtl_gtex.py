@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, roc_auc_score
 
-from westminster.gtex import match_tissue_targets, txrev_keywords
+from westminster.gtex import match_tissue_targets, txrev_keywords, vcf_info_dist
 
 """
 westminster_paqtl_gtex.py
@@ -30,6 +30,12 @@ def main():
         help="Output directory for tissue metrics",
     )
     parser.add_argument(
+        "-g",
+        "--vcf_dir",
+        default=None,
+        help="Directory containing pos_merge.vcf and neg_merge.vcf with PD= INFO tags",
+    )
+    parser.add_argument(
         "-s",
         "--snp_stat",
         default="covgene/JSD",
@@ -41,13 +47,21 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
 
+    # load PAS distances from merged VCFs if available
+    if args.vcf_dir is not None:
+        pos_pas_dist = vcf_info_dist(f"{args.vcf_dir}/pos_merge.vcf", "PD")
+        neg_pas_dist = vcf_info_dist(f"{args.vcf_dir}/neg_merge.vcf", "PD")
+    else:
+        pos_pas_dist = neg_pas_dist = None
+
     metrics_rows = []
 
     for tissue, keyword in txrev_keywords.items():
+        tissue_label = tissue.replace("GTEx_txrev_", "")
         if args.verbose:
-            print(tissue)
+            print(tissue_label)
 
-        pos_scores_file = f"{args.paqtl_dir}/{tissue}_pos/scores.h5"
+        pos_scores_file = f"{args.paqtl_dir}/{tissue_label}_pos/scores.h5"
         if not os.path.isfile(pos_scores_file):
             continue
 
@@ -59,7 +73,7 @@ def main():
             psnp_scores, _ = read_snp_scores(pos_scores_file, keyword, args.snp_stat)
             nsnp_scores, _ = read_snp_scores(neg_scores_file, keyword, args.snp_stat)
         except ValueError:
-            print(f"Skipping {tissue}: no matching targets.", file=sys.stderr)
+            print(f"Skipping {tissue_label}: no matching targets.", file=sys.stderr)
             continue
 
         Xp = list(psnp_scores.values())
@@ -70,7 +84,24 @@ def main():
         auroc = roc_auc_score(labels, scores)
         auprc = average_precision_score(labels, scores)
 
-        metrics_rows.append({"tissue": tissue, "auroc": auroc, "auprc": auprc})
+        metrics_rows.append({"tissue": tissue_label, "auroc": auroc, "auprc": auprc})
+
+        # write per-variant table
+        pos_variants = list(psnp_scores.keys())
+        neg_variants = list(nsnp_scores.keys())
+        scatter_data = {
+            "variant": pos_variants + neg_variants,
+            "label": ["pos"] * len(pos_variants) + ["neg"] * len(neg_variants),
+            "pred": [psnp_scores[v] for v in pos_variants]
+            + [nsnp_scores[v] for v in neg_variants],
+        }
+        if pos_pas_dist is not None:
+            scatter_data["pas_dist"] = [
+                pos_pas_dist.get(v, np.nan) for v in pos_variants
+            ] + [neg_pas_dist.get(v, np.nan) for v in neg_variants]
+        pd.DataFrame(scatter_data).to_csv(
+            f"{args.out_dir}/{tissue_label}.tsv", index=False, sep="\t"
+        )
 
         if args.verbose:
             print(f"  AUROC={auroc:.4f}  AUPRC={auprc:.4f}")

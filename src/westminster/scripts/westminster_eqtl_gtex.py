@@ -12,7 +12,14 @@ import pybedtools
 from scipy.stats import spearmanr
 from sklearn.metrics import average_precision_score, roc_auc_score
 
-from westminster.gtex import match_tissue_targets, tissue_keywords, vcf_tss_dist
+from westminster.gtex import (
+    match_tissue_targets,
+    read_gene_tss,
+    tissue_keywords,
+    trim_dot,
+    variant_pos,
+    vcf_tss_dist,
+)
 
 """
 westminster_eqtl_gtex.py
@@ -31,7 +38,7 @@ def main():
         "-b",
         "--genes_bed_file",
         default=f"{os.environ['HG38']}/genes/gencode48/gencode48_basic_protein_tss2.bed",
-        help="BED file of gene TSS positions, for computing variant distance to TSS",
+        help="BED file of gene TSS positions, for computing variant distance to TSS [Default: %(default)s]",
     )
     parser.add_argument(
         "-g",
@@ -64,6 +71,8 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
 
+    gene_tss = read_gene_tss(args.genes_bed_file)
+
     metrics_rows = []
     for tissue, keyword in tissue_keywords.items():
         if args.verbose:
@@ -71,7 +80,7 @@ def main():
 
         # read causal variants
         tissue_vcf_file = f"{args.gtex_vcf_dir}/{tissue}_pos.vcf"
-        eqtl_df = read_eqtl(tissue, tissue_vcf_file)
+        eqtl_df = read_eqtl(tissue, tissue_vcf_file, gene_tss=gene_tss)
         if eqtl_df is not None and eqtl_df.shape[0] > args.min_variants:
             # read model predictions
             gtex_scores_file = f"{args.gtex_dir}/{tissue}_pos/scores.h5"
@@ -130,6 +139,7 @@ def main():
                     "coef": eqtl_df.coef,
                     "pred": variant_scores,
                     "tss_dist": eqtl_df.tss_dist,
+                    "tss_dist_eqtl": eqtl_df.tss_dist_eqtl,
                 }
             )
             neg_df = pd.DataFrame(
@@ -139,6 +149,7 @@ def main():
                     "coef": np.nan,
                     "pred": neg_abs,
                     "tss_dist": neg_tss_dist,
+                    "tss_dist_eqtl": np.nan,
                 }
             )
             scatter_df = pd.concat([pos_df, neg_df], ignore_index=True)
@@ -176,13 +187,17 @@ def main():
     print("Class AUPRC: %.4f" % np.mean(metrics_df.auprc_class))
 
 
-def read_eqtl(tissue: str, tissue_vcf_file: str, pip_t: float = 0.9):
+def read_eqtl(
+    tissue: str, tissue_vcf_file: str, pip_t: float = 0.9, gene_tss: dict = None
+):
     """Reads eQTLs from SUSIE output.
 
     Args:
       tissue (str): Tissue name.
       tissue_vcf_file (str): Path to tissue VCF file.
       pip_t (float): PIP threshold.
+      gene_tss (dict): Optional {ensg_trimmed: (chrom, tss_pos)} from read_gene_tss().
+          If provided, adds tss_dist_eqtl column (min gene TSS distance per variant).
 
     Returns:
       eqtl_df (pd.DataFrame): eQTL dataframe, or None if tissue skipped.
@@ -198,6 +213,20 @@ def read_eqtl(tissue: str, tissue_vcf_file: str, pip_t: float = 0.9):
     pip_t = float(pip_match) / 100
     assert pip_t > 0 and pip_t <= 1
     df_causal = df_eqtl[df_eqtl.pip > pip_t]
+
+    # compute per-variant min gene TSS distance from per-gene data
+    variant_tss_eqtl = {}
+    if gene_tss is not None:
+        for row in df_causal.itertuples():
+            vid = row.variant
+            gene_id = trim_dot(row.gene)
+            gene_info = gene_tss.get(gene_id)
+            if gene_info is not None:
+                v_chrom, v_pos = variant_pos(vid)
+                if gene_info[0] == v_chrom:
+                    dist = abs(v_pos - gene_info[1])
+                    if vid not in variant_tss_eqtl or dist < variant_tss_eqtl[vid]:
+                        variant_tss_eqtl[vid] = dist
 
     # remove variants with inconsistent signs
     variant_a1 = {}
@@ -253,6 +282,9 @@ def read_eqtl(tissue: str, tissue_vcf_file: str, pip_t: float = 0.9):
                 "allele": [variant_a1[vid] for vid in pred_variants],
                 "consistent": consistent_mask,
                 "class": [variant_class[vid] for vid in pred_variants],
+                "tss_dist_eqtl": [
+                    variant_tss_eqtl.get(vid, np.nan) for vid in pred_variants
+                ],
             }
         )
     return eqtl_df

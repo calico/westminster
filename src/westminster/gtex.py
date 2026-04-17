@@ -106,6 +106,60 @@ def trim_dot(gene_id):
     return gene_id
 
 
+def read_gene_tss(genes_bed_file: str):
+    """Build a lookup from trimmed gene ID to TSS position.
+
+    Args:
+        genes_bed_file: BED file with gene TSS positions.
+            Column 3 format: ENST.../ENSG.../SYMBOL
+
+    Returns:
+        Dictionary mapping trimmed ENSG ID to (chrom, tss_pos).
+    """
+    gene_tss = {}
+    for line in open(genes_bed_file):
+        fields = line.strip().split("\t")
+        chrom = fields[0]
+        tss_pos = (int(fields[1]) + int(fields[2])) // 2
+        name = fields[3]
+        ensg = name.split("/")[1]
+        ensg_trim = trim_dot(ensg)
+        if ensg_trim not in gene_tss:
+            gene_tss[ensg_trim] = (chrom, tss_pos)
+    return gene_tss
+
+
+def variant_pos(variant_id: str):
+    """Parse chromosome and position from variant ID (e.g. chr1_13550_G_A_b38)."""
+    parts = variant_id.split("_")
+    return parts[0], int(parts[1])
+
+
+def vcf_info_dist(vcf_file: str, tag: str):
+    """Return {variant_id: distance} parsed from a VCF INFO field tag.
+
+    Args:
+        vcf_file: VCF file path (supports ##header lines).
+        tag: INFO tag name to extract (e.g. 'SD' or 'PD').
+
+    Returns:
+        Dictionary mapping variant ID to integer distance.
+    """
+    dist_map = {}
+    prefix = f"{tag}="
+    for line in open(vcf_file):
+        if line.startswith("#"):
+            continue
+        fields = line.split("\t")
+        variant = fields[2]
+        info = fields[7]
+        for field in info.split(";"):
+            if field.startswith(prefix):
+                dist_map[variant] = int(field[len(prefix) :])
+                break
+    return dist_map
+
+
 def vcf_tss_dist(vcf_file, genes_bed_file):
     """Return distance to nearest TSS for each variant, preserving VCF order."""
     genes_bt = pybedtools.BedTool(genes_bed_file)

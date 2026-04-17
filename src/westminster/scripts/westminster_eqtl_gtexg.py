@@ -13,8 +13,10 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 
 from westminster.gtex import (
     match_tissue_targets,
+    read_gene_tss,
     tissue_keywords,
     trim_dot,
+    variant_pos,
     vcf_tss_dist,
 )
 
@@ -239,35 +241,6 @@ def main():
     print("Measured SpearmanR:   %.4f" % np.mean(metrics_df.measured_spearmanr))
     print("Measured Class AUROC: %.4f" % np.mean(metrics_df.measured_auroc_class))
     print("Measured Class AUPRC: %.4f" % np.mean(metrics_df.measured_auprc_class))
-
-
-def read_gene_tss(genes_bed_file: str):
-    """Build a lookup from trimmed gene ID to TSS position.
-
-    Args:
-        genes_bed_file: BED file with gene TSS positions.
-            Column 3 format: ENST.../ENSG.../SYMBOL
-
-    Returns:
-        Dictionary mapping trimmed ENSG ID to (chrom, tss_pos).
-    """
-    gene_tss = {}
-    for line in open(genes_bed_file):
-        fields = line.strip().split("\t")
-        chrom = fields[0]
-        tss_pos = (int(fields[1]) + int(fields[2])) // 2
-        name = fields[3]
-        ensg = name.split("/")[1]
-        ensg_trim = trim_dot(ensg)
-        if ensg_trim not in gene_tss:
-            gene_tss[ensg_trim] = (chrom, tss_pos)
-    return gene_tss
-
-
-def variant_pos(variant_id: str):
-    """Parse chromosome and position from variant ID (e.g. chr1_13550_G_A_b38)."""
-    parts = variant_id.split("_")
-    return parts[0], int(parts[1])
 
 
 def compute_eqtl_tss_dist(eqtl_df: pd.DataFrame, gene_tss: dict):
