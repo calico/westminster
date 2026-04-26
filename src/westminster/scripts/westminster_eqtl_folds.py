@@ -233,7 +233,7 @@ def main():
         "--ems",
         default=False,
         action="store_true",
-        help="Use the legacy EMS pipeline for coefficient analysis (reads susie TSV instead of VCF INFO)",
+        help="Use the legacy EMS pipeline (reads susie TSV instead of VCF INFO)",
     )
     # GTEx directory
     gtex_group.add_argument(
@@ -406,7 +406,7 @@ def main():
                 slurmrunner.multi_run(jobs, verbose=True)
 
     ################################################################
-    # coefficient analysis
+    # metrics
 
     jobs = []
     for ci in range(args.crosses):
@@ -415,27 +415,29 @@ def main():
             it_out_dir = f"{it_dir}/{gtex_out_dir}"
             for snp_stat in snp_stats:
                 stat_label = snp_stat.replace("/", "-")
-                coef_out_dir = f"{it_out_dir}/coef-{stat_label}"
+                metrics_out_dir = f"{it_out_dir}/metrics-{stat_label}"
 
-                if not os.path.isfile(f"{coef_out_dir}/metrics.tsv"):
+                if not os.path.isfile(f"{metrics_out_dir}/metrics.tsv"):
                     if snp_stat.startswith("cov/"):
-                        cmd_coef = f"westminster_eqtl_gtex.py -g {args.gtex_vcf_dir}"
+                        cmd_metrics = f"westminster_eqtl_gtex.py -g {args.gtex_vcf_dir}"
                     else:
-                        cmd_coef = f"westminster_eqtl_gtexg.py -g {args.gtex_vcf_dir}"
+                        cmd_metrics = (
+                            f"westminster_eqtl_gtexg.py -g {args.gtex_vcf_dir}"
+                        )
                     if args.ems:
-                        cmd_coef += " --ems"
-                    cmd_coef += f" -o {coef_out_dir}"
-                    cmd_coef += f" -s {snp_stat}"
-                    cmd_coef += f" {it_out_dir}"
+                        cmd_metrics += " --ems"
+                    cmd_metrics += f" -o {metrics_out_dir}"
+                    cmd_metrics += f" -s {snp_stat}"
+                    cmd_metrics += f" {it_out_dir}"
 
                     if args.local:
-                        jobs.append(cmd_coef)
+                        jobs.append(cmd_metrics)
                     else:
                         j = slurmrunner.Job(
-                            cmd_coef,
-                            "coef",
-                            f"{coef_out_dir}.out",
-                            f"{coef_out_dir}.err",
+                            cmd_metrics,
+                            "metrics",
+                            f"{metrics_out_dir}.out",
+                            f"{metrics_out_dir}.err",
                             queue="standard",
                             cpu=2,
                             mem=22000,
@@ -446,27 +448,27 @@ def main():
     # ensemble
     for snp_stat in snp_stats:
         stat_label = snp_stat.replace("/", "-")
-        coef_out_dir = f"{ens_out_dir}/coef-{stat_label}"
+        metrics_out_dir = f"{ens_out_dir}/metrics-{stat_label}"
 
-        if not os.path.isfile(f"{coef_out_dir}/metrics.tsv"):
+        if not os.path.isfile(f"{metrics_out_dir}/metrics.tsv"):
             if snp_stat.startswith("cov/"):
-                cmd_coef = f"westminster_eqtl_gtex.py -g {args.gtex_vcf_dir}"
+                cmd_metrics = f"westminster_eqtl_gtex.py -g {args.gtex_vcf_dir}"
             else:
-                cmd_coef = f"westminster_eqtl_gtexg.py -g {args.gtex_vcf_dir}"
+                cmd_metrics = f"westminster_eqtl_gtexg.py -g {args.gtex_vcf_dir}"
             if args.ems:
-                cmd_coef += " --ems"
-            cmd_coef += f" -o {coef_out_dir}"
-            cmd_coef += f" -s {snp_stat}"
-            cmd_coef += f" {ens_out_dir}"
+                cmd_metrics += " --ems"
+            cmd_metrics += f" -o {metrics_out_dir}"
+            cmd_metrics += f" -s {snp_stat}"
+            cmd_metrics += f" {ens_out_dir}"
 
             if args.local:
-                jobs.append(cmd_coef)
+                jobs.append(cmd_metrics)
             else:
                 j = slurmrunner.Job(
-                    cmd_coef,
-                    "coef",
-                    f"{coef_out_dir}.out",
-                    f"{coef_out_dir}.err",
+                    cmd_metrics,
+                    "metrics",
+                    f"{metrics_out_dir}.out",
+                    f"{metrics_out_dir}.err",
                     queue="standard",
                     cpu=2,
                     mem=22000,

@@ -400,7 +400,7 @@ def main():
                 slurmrunner.multi_run(jobs, verbose=True)
 
     ################################################################
-    # coefficient analysis
+    # metrics
 
     jobs = []
     for ci in range(args.crosses):
@@ -409,22 +409,22 @@ def main():
             it_out_dir = f"{it_dir}/{gtex_out_dir}"
             for snp_stat in snp_stats:
                 stat_label = snp_stat.replace("/", "-")
-                coef_out_dir = f"{it_out_dir}/coef-{stat_label}"
+                metrics_out_dir = f"{it_out_dir}/metrics-{stat_label}"
 
-                cmd_coef = f"westminster_paqtl_gtex.py -g {args.gtex_vcf_dir}"
-                cmd_coef += f" -o {coef_out_dir}"
-                cmd_coef += f" -s {snp_stat}"
-                cmd_coef += f" {it_out_dir}"
+                cmd_metrics = f"westminster_paqtl_gtex.py -g {args.gtex_vcf_dir}"
+                cmd_metrics += f" -o {metrics_out_dir}"
+                cmd_metrics += f" -s {snp_stat}"
+                cmd_metrics += f" {it_out_dir}"
 
                 if args.local:
-                    jobs.append(cmd_coef)
+                    jobs.append(cmd_metrics)
                 else:
                     j = slurmrunner.Job(
-                        cmd_coef,
-                        "coef",
-                        f"{coef_out_dir}.out",
-                        f"{coef_out_dir}.err",
-                        f"{coef_out_dir}.sb",
+                        cmd_metrics,
+                        "metrics",
+                        f"{metrics_out_dir}.out",
+                        f"{metrics_out_dir}.err",
+                        f"{metrics_out_dir}.sb",
                         queue="standard",
                         cpu=2,
                         mem=22000,
@@ -435,22 +435,22 @@ def main():
     # ensemble
     for snp_stat in snp_stats:
         stat_label = snp_stat.replace("/", "-")
-        coef_out_dir = f"{ens_out_dir}/coef-{stat_label}"
+        metrics_out_dir = f"{ens_out_dir}/metrics-{stat_label}"
 
-        cmd_coef = f"westminster_paqtl_gtex.py -g {args.gtex_vcf_dir}"
-        cmd_coef += f" -o {coef_out_dir}"
-        cmd_coef += f" -s {snp_stat}"
-        cmd_coef += f" {ens_out_dir}"
+        cmd_metrics = f"westminster_paqtl_gtex.py -g {args.gtex_vcf_dir}"
+        cmd_metrics += f" -o {metrics_out_dir}"
+        cmd_metrics += f" -s {snp_stat}"
+        cmd_metrics += f" {ens_out_dir}"
 
         if args.local:
-            jobs.append(cmd_coef)
+            jobs.append(cmd_metrics)
         else:
             j = slurmrunner.Job(
-                cmd_coef,
-                "coef",
-                f"{coef_out_dir}.out",
-                f"{coef_out_dir}.err",
-                f"{coef_out_dir}.sb",
+                cmd_metrics,
+                "metrics",
+                f"{metrics_out_dir}.out",
+                f"{metrics_out_dir}.err",
+                f"{metrics_out_dir}.sb",
                 queue="standard",
                 cpu=2,
                 mem=22000,

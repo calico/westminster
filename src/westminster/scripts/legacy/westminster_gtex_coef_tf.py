@@ -17,8 +17,7 @@ import seaborn as sns
 """
 westminster_gtex_coef.py
 
-Evaluate concordance of variant effect prediction sign classifcation
-and coefficient correlations.
+Score variant-effect predictions against GTEx eQTLs across multiple metrics.
 """
 
 
@@ -30,7 +29,7 @@ def main():
     parser.add_argument(
         "-o",
         "--out_dir",
-        default="coef_out",
+        default="metrics_out",
         help="Output directory for tissue metrics",
     )
     parser.add_argument(
