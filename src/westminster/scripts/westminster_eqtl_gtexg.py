@@ -57,6 +57,12 @@ def main():
         default="logSUM",
         help="SNP statistic. [Default: %(default)s]",
     )
+    parser.add_argument(
+        "--ems",
+        action="store_true",
+        help="Use the legacy EMS pipeline: pull variant metadata from the "
+        "gtex_fine/tissues_susie/{tissue}.tsv tables instead of the VCF INFO.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("gtex_dir")
     args = parser.parse_args()
@@ -72,7 +78,11 @@ def main():
             print(tissue)
 
         # read causal variants
-        eqtl_df = read_eqtl(tissue, args.gtex_vcf_dir)
+        tissue_vcf_file = f"{args.gtex_vcf_dir}/{tissue}_pos.vcf"
+        if args.ems:
+            eqtl_df = read_eqtl_ems(tissue, args.gtex_vcf_dir)
+        else:
+            eqtl_df = read_eqtl_vcf(tissue_vcf_file)
         if eqtl_df is not None:
             # read model predictions
             gtex_scores_file = f"{args.gtex_dir}/{tissue}_pos/scores.h5"
@@ -264,7 +274,27 @@ def compute_eqtl_tss_dist(eqtl_df: pd.DataFrame, gene_tss: dict):
     return dists
 
 
-def read_eqtl(tissue: str, gtex_vcf_dir: str, pip_t: float = 0.9):
+def read_eqtl_vcf(tissue_vcf_file: str):
+    """Read eQTLs from the new gtex_eqtl VCF (INFO carries GENE, AFC)."""
+    if not os.path.isfile(tissue_vcf_file):
+        return None
+    rows = []
+    for line in open(tissue_vcf_file):
+        if line.startswith("#"):
+            continue
+        cols = line.rstrip("\n").split("\t")
+        vid = cols[2]
+        ref = cols[3]
+        info = dict(f.split("=", 1) for f in cols[7].split(";") if "=" in f)
+        gene = info.get("GENE", "")
+        afc = float(info["AFC"])
+        if not gene:
+            continue
+        rows.append({"variant": vid, "gene": gene, "coef": afc, "allele1": ref})
+    return pd.DataFrame(rows) if rows else None
+
+
+def read_eqtl_ems(tissue: str, gtex_vcf_dir: str, pip_t: float = 0.9):
     """Reads eQTLs from SUSIE output.
 
     Args:

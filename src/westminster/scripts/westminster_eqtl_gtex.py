@@ -65,6 +65,12 @@ def main():
         default="logSUM",
         help="SNP statistic. [Default: %(default)s]",
     )
+    parser.add_argument(
+        "--ems",
+        action="store_true",
+        help="Use the legacy EMS pipeline: pull variant metadata from the "
+        "gtex_fine/tissues_susie/{tissue}.tsv tables instead of the VCF INFO.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("gtex_dir")
     args = parser.parse_args()
@@ -80,7 +86,10 @@ def main():
 
         # read causal variants
         tissue_vcf_file = f"{args.gtex_vcf_dir}/{tissue}_pos.vcf"
-        eqtl_df = read_eqtl(tissue, tissue_vcf_file, gene_tss=gene_tss)
+        if args.ems:
+            eqtl_df = read_eqtl_ems(tissue, tissue_vcf_file, gene_tss=gene_tss)
+        else:
+            eqtl_df = read_eqtl_vcf(tissue_vcf_file)
         if eqtl_df is not None and eqtl_df.shape[0] > args.min_variants:
             # read model predictions
             gtex_scores_file = f"{args.gtex_dir}/{tissue}_pos/scores.h5"
@@ -187,7 +196,62 @@ def main():
     print("Class AUPRC: %.4f" % np.mean(metrics_df.auprc_class))
 
 
-def read_eqtl(
+def read_eqtl_vcf(tissue_vcf_file: str):
+    """Read eQTLs from the new gtex_eqtl VCF (INFO carries GENE, PIP, AFC, TSSD).
+
+    Returns a dataframe with one row per VCF variant, preserving VCF order so
+    indices align with the corresponding scores.h5. Every positive is expected
+    to carry a numeric AFC; the upstream eqtl_vcfs.py filter drops NaN-AFC
+    rows at selection time, so an AFC=. here would indicate an upstream bug
+    and is intentionally left to raise.
+    """
+    if not os.path.isfile(tissue_vcf_file):
+        return None
+
+    variants = []
+    refs = []
+    afcs = []
+    classes = []
+    tss_dists = []
+    for line in open(tissue_vcf_file):
+        if line.startswith("#"):
+            continue
+        cols = line.rstrip("\n").split("\t")
+        vid = cols[2]
+        ref = cols[3]
+        alt = cols[4]
+        info_fields = dict(f.split("=", 1) for f in cols[7].split(";") if "=" in f)
+        afc = float(info_fields["AFC"])
+        tssd_raw = info_fields["TSSD"]
+        tssd = np.nan if tssd_raw == "." else float(tssd_raw)
+        if len(ref) == len(alt):
+            vclass = "SNP"
+        elif len(ref) < len(alt):
+            vclass = "insertion"
+        else:
+            vclass = "deletion"
+        variants.append(vid)
+        refs.append(ref)
+        afcs.append(afc)
+        classes.append(vclass)
+        tss_dists.append(tssd)
+
+    afcs = np.asarray(afcs)
+    eqtl_df = pd.DataFrame(
+        {
+            "variant": variants,
+            "coef": afcs,
+            "sign": afcs > 0,
+            "allele": refs,
+            "consistent": np.ones(len(afcs), dtype=bool),
+            "class": classes,
+            "tss_dist_eqtl": tss_dists,
+        }
+    )
+    return eqtl_df
+
+
+def read_eqtl_ems(
     tissue: str, tissue_vcf_file: str, pip_t: float = 0.9, gene_tss: dict = None
 ):
     """Reads eQTLs from SUSIE output.

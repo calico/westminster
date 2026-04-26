@@ -3,12 +3,18 @@ import argparse
 import os
 import sys
 
+import glob
 import h5py
 import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, roc_auc_score
 
-from westminster.gtex import match_tissue_targets, txrev_keywords, vcf_info_dist
+from westminster.gtex import (
+    match_tissue_targets,
+    txrev_keywords,
+    gtexv11_keywords,
+    vcf_info_dist,
+)
 
 """
 westminster_paqtl_gtex.py
@@ -54,14 +60,24 @@ def main():
     else:
         pos_pas_dist = neg_pas_dist = None
 
+    keyword_lookup = {
+        t.replace("GTEx_txrev_", ""): kw for t, kw in txrev_keywords.items()
+    }
+    keyword_lookup.update(gtexv11_keywords)
+
     metrics_rows = []
 
-    for tissue, keyword in txrev_keywords.items():
-        tissue_label = tissue.replace("GTEx_txrev_", "")
+    for pos_dir in sorted(glob.glob(f"{args.paqtl_dir}/*_pos")):
+        tissue_label = os.path.basename(pos_dir).removesuffix("_pos")
+        if tissue_label not in keyword_lookup:
+            print(f"Skipping {tissue_label}: no keyword mapping.", file=sys.stderr)
+            continue
+        keyword = keyword_lookup[tissue_label]
+
         if args.verbose:
             print(tissue_label)
 
-        pos_scores_file = f"{args.paqtl_dir}/{tissue_label}_pos/scores.h5"
+        pos_scores_file = f"{pos_dir}/scores.h5"
         if not os.path.isfile(pos_scores_file):
             continue
 

@@ -229,6 +229,12 @@ def main():
         action="store_true",
         help="Skip westminster_classify.py classifier stage",
     )
+    gtex_group.add_argument(
+        "--ems",
+        default=False,
+        action="store_true",
+        help="Use the legacy EMS pipeline for coefficient analysis (reads susie TSV instead of VCF INFO)",
+    )
     # GTEx directory
     gtex_group.add_argument(
         "--gtex",
@@ -416,6 +422,8 @@ def main():
                         cmd_coef = f"westminster_eqtl_gtex.py -g {args.gtex_vcf_dir}"
                     else:
                         cmd_coef = f"westminster_eqtl_gtexg.py -g {args.gtex_vcf_dir}"
+                    if args.ems:
+                        cmd_coef += " --ems"
                     cmd_coef += f" -o {coef_out_dir}"
                     cmd_coef += f" -s {snp_stat}"
                     cmd_coef += f" {it_out_dir}"
@@ -445,6 +453,8 @@ def main():
                 cmd_coef = f"westminster_eqtl_gtex.py -g {args.gtex_vcf_dir}"
             else:
                 cmd_coef = f"westminster_eqtl_gtexg.py -g {args.gtex_vcf_dir}"
+            if args.ems:
+                cmd_coef += " --ems"
             cmd_coef += f" -o {coef_out_dir}"
             cmd_coef += f" -s {snp_stat}"
             cmd_coef += f" {ens_out_dir}"
