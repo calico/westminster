@@ -285,7 +285,7 @@ def read_eqtl_vcf(tissue_vcf_file: str):
         vid = cols[2]
         ref = cols[3]
         info = dict(f.split("=", 1) for f in cols[7].split(";") if "=" in f)
-        gene = info.get("GENE", "")
+        gene = trim_dot(info.get("GENE", ""))
         afc = float(info["AFC"])
         if not gene:
             continue

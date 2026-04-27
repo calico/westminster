@@ -364,40 +364,40 @@ def main():
                                 )
                                 jobs.append(j)
 
-            # ensemble
-            for gtex_pos_vcf in glob.glob(f"{args.gtex_vcf_dir}/*_pos.vcf"):
-                tissue = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0][:-4]
-                tissue_label = tissue.replace("GTEx_txrev_", "")
-                sad_pos = f"{ens_out_dir}/{tissue_label}_pos/scores.h5"
-                sad_neg = f"{ens_out_dir}/{tissue_label}_neg/scores.h5"
-                for snp_stat in snp_stats_gene:
-                    stat_label = snp_stat.replace("/", "-")
-                    class_out_dir = f"{ens_out_dir}/{tissue_label}_class-{stat_label}"
-                    if args.class_name is not None:
-                        class_out_dir += f"-{args.class_name}"
-                    if not os.path.isfile(f"{class_out_dir}/stats.txt"):
-                        cmd_class = f"{cmd_base} -o {class_out_dir} --stat {snp_stat}"
-                        cmd_class += f" {sad_pos} {sad_neg}"
-                        if args.local:
-                            jobs.append(cmd_class)
-                        else:
-                            j = slurmrunner.Job(
-                                cmd_class,
-                                tissue,
-                                f"{class_out_dir}.out",
-                                f"{class_out_dir}.err",
-                                f"{class_out_dir}.sb",
-                                queue="standard",
-                                cpu=2,
-                                mem=22000,
-                                time="1-0:0:0",
-                            )
-                            jobs.append(j)
+        # ensemble
+        for gtex_pos_vcf in glob.glob(f"{args.gtex_vcf_dir}/*_pos.vcf"):
+            tissue = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0][:-4]
+            tissue_label = tissue.replace("GTEx_txrev_", "")
+            sad_pos = f"{ens_out_dir}/{tissue_label}_pos/scores.h5"
+            sad_neg = f"{ens_out_dir}/{tissue_label}_neg/scores.h5"
+            for snp_stat in snp_stats_gene:
+                stat_label = snp_stat.replace("/", "-")
+                class_out_dir = f"{ens_out_dir}/{tissue_label}_class-{stat_label}"
+                if args.class_name is not None:
+                    class_out_dir += f"-{args.class_name}"
+                if not os.path.isfile(f"{class_out_dir}/stats.txt"):
+                    cmd_class = f"{cmd_base} -o {class_out_dir} --stat {snp_stat}"
+                    cmd_class += f" {sad_pos} {sad_neg}"
+                    if args.local:
+                        jobs.append(cmd_class)
+                    else:
+                        j = slurmrunner.Job(
+                            cmd_class,
+                            tissue,
+                            f"{class_out_dir}.out",
+                            f"{class_out_dir}.err",
+                            f"{class_out_dir}.sb",
+                            queue="standard",
+                            cpu=2,
+                            mem=22000,
+                            time="1-0:0:0",
+                        )
+                        jobs.append(j)
 
-            if args.local:
-                utils.exec_par(jobs, 3, verbose=True)
-            else:
-                slurmrunner.multi_run(jobs, verbose=True)
+        if args.local:
+            utils.exec_par(jobs, 3, verbose=True)
+        else:
+            slurmrunner.multi_run(jobs, verbose=True)
 
     ################################################################
     # metrics

@@ -76,7 +76,7 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
 
-    gene_tss = read_gene_tss(args.genes_bed_file)
+    gene_tss = read_gene_tss(args.genes_bed_file) if args.ems else None
 
     metrics_rows = []
     for tissue, keyword in tissue_keywords.items():
