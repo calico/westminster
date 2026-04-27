@@ -12,13 +12,19 @@ import pybedtools
 from scipy.stats import spearmanr
 from sklearn.metrics import average_precision_score, roc_auc_score
 
-from westminster.gtex import match_tissue_targets, tissue_keywords, vcf_tss_dist
+from westminster.gtex import (
+    match_tissue_targets,
+    read_gene_tss,
+    tissue_keywords,
+    trim_dot,
+    variant_pos,
+    vcf_tss_dist,
+)
 
 """
 westminster_eqtl_gtex.py
 
-Evaluate concordance of variant effect prediction sign classifcation
-and coefficient correlations.
+Score variant-effect predictions against GTEx eQTLs across multiple metrics.
 """
 
 
@@ -31,7 +37,7 @@ def main():
         "-b",
         "--genes_bed_file",
         default=f"{os.environ['HG38']}/genes/gencode48/gencode48_basic_protein_tss2.bed",
-        help="BED file of gene TSS positions, for computing variant distance to TSS",
+        help="BED file of gene TSS positions, for computing variant distance to TSS [Default: %(default)s]",
     )
     parser.add_argument(
         "-g",
@@ -49,7 +55,7 @@ def main():
     parser.add_argument(
         "-o",
         "--out_dir",
-        default="coef_out",
+        default="metrics_out",
         help="Output directory for tissue metrics",
     )
     parser.add_argument(
@@ -58,11 +64,19 @@ def main():
         default="logSUM",
         help="SNP statistic. [Default: %(default)s]",
     )
+    parser.add_argument(
+        "--ems",
+        action="store_true",
+        help="Use the legacy EMS pipeline: pull variant metadata from the "
+        "gtex_fine/tissues_susie/{tissue}.tsv tables instead of the VCF INFO.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("gtex_dir")
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
+
+    gene_tss = read_gene_tss(args.genes_bed_file) if args.ems else None
 
     metrics_rows = []
     for tissue, keyword in tissue_keywords.items():
@@ -71,7 +85,10 @@ def main():
 
         # read causal variants
         tissue_vcf_file = f"{args.gtex_vcf_dir}/{tissue}_pos.vcf"
-        eqtl_df = read_eqtl(tissue, tissue_vcf_file)
+        if args.ems:
+            eqtl_df = read_eqtl_ems(tissue, tissue_vcf_file, gene_tss=gene_tss)
+        else:
+            eqtl_df = read_eqtl_vcf(tissue_vcf_file)
         if eqtl_df is not None and eqtl_df.shape[0] > args.min_variants:
             # read model predictions
             gtex_scores_file = f"{args.gtex_dir}/{tissue}_pos/scores.h5"
@@ -130,6 +147,7 @@ def main():
                     "coef": eqtl_df.coef,
                     "pred": variant_scores,
                     "tss_dist": eqtl_df.tss_dist,
+                    "tss_dist_eqtl": eqtl_df.tss_dist_eqtl,
                 }
             )
             neg_df = pd.DataFrame(
@@ -139,6 +157,7 @@ def main():
                     "coef": np.nan,
                     "pred": neg_abs,
                     "tss_dist": neg_tss_dist,
+                    "tss_dist_eqtl": np.nan,
                 }
             )
             scatter_df = pd.concat([pos_df, neg_df], ignore_index=True)
@@ -176,13 +195,72 @@ def main():
     print("Class AUPRC: %.4f" % np.mean(metrics_df.auprc_class))
 
 
-def read_eqtl(tissue: str, tissue_vcf_file: str, pip_t: float = 0.9):
+def read_eqtl_vcf(tissue_vcf_file: str):
+    """Read eQTLs from the new gtex_eqtl VCF (INFO carries GENE, PIP, AFC, TSSD).
+
+    Returns a dataframe with one row per VCF variant, preserving VCF order so
+    indices align with the corresponding scores.h5. Every positive is expected
+    to carry a numeric AFC; the upstream eqtl_vcfs.py filter drops NaN-AFC
+    rows at selection time, so an AFC=. here would indicate an upstream bug
+    and is intentionally left to raise.
+    """
+    if not os.path.isfile(tissue_vcf_file):
+        return None
+
+    variants = []
+    refs = []
+    afcs = []
+    classes = []
+    tss_dists = []
+    for line in open(tissue_vcf_file):
+        if line.startswith("#"):
+            continue
+        cols = line.rstrip("\n").split("\t")
+        vid = cols[2]
+        ref = cols[3]
+        alt = cols[4]
+        info_fields = dict(f.split("=", 1) for f in cols[7].split(";") if "=" in f)
+        afc = float(info_fields["AFC"])
+        tssd_raw = info_fields["TSSD"]
+        tssd = np.nan if tssd_raw == "." else float(tssd_raw)
+        if len(ref) == len(alt):
+            vclass = "SNP"
+        elif len(ref) < len(alt):
+            vclass = "insertion"
+        else:
+            vclass = "deletion"
+        variants.append(vid)
+        refs.append(ref)
+        afcs.append(afc)
+        classes.append(vclass)
+        tss_dists.append(tssd)
+
+    afcs = np.asarray(afcs)
+    eqtl_df = pd.DataFrame(
+        {
+            "variant": variants,
+            "coef": afcs,
+            "sign": afcs > 0,
+            "allele": refs,
+            "consistent": np.ones(len(afcs), dtype=bool),
+            "class": classes,
+            "tss_dist_eqtl": tss_dists,
+        }
+    )
+    return eqtl_df
+
+
+def read_eqtl_ems(
+    tissue: str, tissue_vcf_file: str, pip_t: float = 0.9, gene_tss: dict = None
+):
     """Reads eQTLs from SUSIE output.
 
     Args:
       tissue (str): Tissue name.
       tissue_vcf_file (str): Path to tissue VCF file.
       pip_t (float): PIP threshold.
+      gene_tss (dict): Optional {ensg_trimmed: (chrom, tss_pos)} from read_gene_tss().
+          If provided, adds tss_dist_eqtl column (min gene TSS distance per variant).
 
     Returns:
       eqtl_df (pd.DataFrame): eQTL dataframe, or None if tissue skipped.
@@ -198,6 +276,20 @@ def read_eqtl(tissue: str, tissue_vcf_file: str, pip_t: float = 0.9):
     pip_t = float(pip_match) / 100
     assert pip_t > 0 and pip_t <= 1
     df_causal = df_eqtl[df_eqtl.pip > pip_t]
+
+    # compute per-variant min gene TSS distance from per-gene data
+    variant_tss_eqtl = {}
+    if gene_tss is not None:
+        for row in df_causal.itertuples():
+            vid = row.variant
+            gene_id = trim_dot(row.gene)
+            gene_info = gene_tss.get(gene_id)
+            if gene_info is not None:
+                v_chrom, v_pos = variant_pos(vid)
+                if gene_info[0] == v_chrom:
+                    dist = abs(v_pos - gene_info[1])
+                    if vid not in variant_tss_eqtl or dist < variant_tss_eqtl[vid]:
+                        variant_tss_eqtl[vid] = dist
 
     # remove variants with inconsistent signs
     variant_a1 = {}
@@ -253,6 +345,9 @@ def read_eqtl(tissue: str, tissue_vcf_file: str, pip_t: float = 0.9):
                 "allele": [variant_a1[vid] for vid in pred_variants],
                 "consistent": consistent_mask,
                 "class": [variant_class[vid] for vid in pred_variants],
+                "tss_dist_eqtl": [
+                    variant_tss_eqtl.get(vid, np.nan) for vid in pred_variants
+                ],
             }
         )
     return eqtl_df

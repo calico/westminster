@@ -221,7 +221,19 @@ def main():
         "--metrics_only",
         default=False,
         action="store_true",
-        help="Skip SNP scoring, splitting, and classifiers; only run coefficient/metrics analysis",
+        help="Skip SNP scoring and splitting; only run classifiers and metrics analysis",
+    )
+    gtex_group.add_argument(
+        "--skip_boost",
+        default=False,
+        action="store_true",
+        help="Skip westminster_classify.py classifier stage",
+    )
+    gtex_group.add_argument(
+        "--ems",
+        default=False,
+        action="store_true",
+        help="Use the legacy EMS pipeline (reads susie TSV instead of VCF INFO)",
     )
     # GTEx directory
     gtex_group.add_argument(
@@ -308,54 +320,57 @@ def main():
         # split ensemble negatives
         split_scores(ens_out_dir, "neg", args.gtex_vcf_dir, snp_stats)
 
-    ################################################################
-    # fit classifiers
+    if not args.skip_boost:
+        ################################################################
+        # fit classifiers
 
-    snp_stats_cov = [s for s in snp_stats if s.startswith("cov/")]
+        snp_stats_cov = [s for s in snp_stats if s.startswith("cov/")]
 
-    # SNPs (random forest)
-    # cmd_base = "westminster_classify.py -f 8 -i 20 -n 512 -s"
-    # SNPs (xgboost)
-    cmd_base = "westminster_classify.py -f 8 -i 20 -n 96 -s -x"
-    # indels
-    # cmd_base = 'westminster_classify.py -f 6 -i 64 -s'
-    cmd_base += f" --msl {args.msl}"
+        # SNPs (random forest)
+        # cmd_base = "westminster_classify.py -f 8 -i 20 -n 512 -s"
+        # SNPs (xgboost)
+        cmd_base = "westminster_classify.py -f 8 -i 20 -n 96 -s -x"
+        # indels
+        # cmd_base = 'westminster_classify.py -f 6 -i 64 -s'
+        cmd_base += f" --msl {args.msl}"
 
-    if args.class_targets_file is not None:
-        cmd_base += f" -t {args.class_targets_file}"
+        if args.class_targets_file is not None:
+            cmd_base += f" -t {args.class_targets_file}"
 
-    jobs = []
-    for ci in range(args.crosses):
-        for fi in fold_index:
-            it_dir = f"{args.models_dir}/f{fi}c{ci}"
-            it_out_dir = f"{it_dir}/{gtex_out_dir}"
+        jobs = []
+        for ci in range(args.crosses):
+            for fi in fold_index:
+                it_dir = f"{args.models_dir}/f{fi}c{ci}"
+                it_out_dir = f"{it_dir}/{gtex_out_dir}"
 
-            for gtex_pos_vcf in glob.glob(f"{args.gtex_vcf_dir}/*_pos.vcf"):
-                tissue = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0][:-4]
-                sad_pos = f"{it_out_dir}/{tissue}_pos/scores.h5"
-                sad_neg = f"{it_out_dir}/{tissue}_neg/scores.h5"
-                for snp_stat in snp_stats_cov:
-                    stat_label = snp_stat.replace("/", "-")
-                    class_out_dir = f"{it_out_dir}/{tissue}_class-{stat_label}"
-                    if args.class_name is not None:
-                        class_out_dir += f"-{args.class_name}"
-                    if not os.path.isfile(f"{class_out_dir}/stats.txt"):
-                        cmd_class = f"{cmd_base} -o {class_out_dir} --stat {snp_stat}"
-                        cmd_class += f" {sad_pos} {sad_neg}"
-                        if args.local:
-                            jobs.append(cmd_class)
-                        else:
-                            j = slurmrunner.Job(
-                                cmd_class,
-                                tissue,
-                                f"{class_out_dir}.out",
-                                f"{class_out_dir}.err",
-                                queue="standard",
-                                cpu=2,
-                                mem=22000,
-                                time="1-0:0:0",
+                for gtex_pos_vcf in glob.glob(f"{args.gtex_vcf_dir}/*_pos.vcf"):
+                    tissue = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0][:-4]
+                    sad_pos = f"{it_out_dir}/{tissue}_pos/scores.h5"
+                    sad_neg = f"{it_out_dir}/{tissue}_neg/scores.h5"
+                    for snp_stat in snp_stats_cov:
+                        stat_label = snp_stat.replace("/", "-")
+                        class_out_dir = f"{it_out_dir}/{tissue}_class-{stat_label}"
+                        if args.class_name is not None:
+                            class_out_dir += f"-{args.class_name}"
+                        if not os.path.isfile(f"{class_out_dir}/stats.txt"):
+                            cmd_class = (
+                                f"{cmd_base} -o {class_out_dir} --stat {snp_stat}"
                             )
-                            jobs.append(j)
+                            cmd_class += f" {sad_pos} {sad_neg}"
+                            if args.local:
+                                jobs.append(cmd_class)
+                            else:
+                                j = slurmrunner.Job(
+                                    cmd_class,
+                                    tissue,
+                                    f"{class_out_dir}.out",
+                                    f"{class_out_dir}.err",
+                                    queue="standard",
+                                    cpu=2,
+                                    mem=22000,
+                                    time="1-0:0:0",
+                                )
+                                jobs.append(j)
 
         # ensemble
         for gtex_pos_vcf in glob.glob(f"{args.gtex_vcf_dir}/*_pos.vcf"):
@@ -391,7 +406,7 @@ def main():
             slurmrunner.multi_run(jobs, verbose=True)
 
     ################################################################
-    # coefficient analysis
+    # metrics
 
     jobs = []
     for ci in range(args.crosses):
@@ -400,25 +415,29 @@ def main():
             it_out_dir = f"{it_dir}/{gtex_out_dir}"
             for snp_stat in snp_stats:
                 stat_label = snp_stat.replace("/", "-")
-                coef_out_dir = f"{it_out_dir}/coef-{stat_label}"
+                metrics_out_dir = f"{it_out_dir}/metrics-{stat_label}"
 
-                if not os.path.isfile(f"{coef_out_dir}/metrics.tsv"):
+                if not os.path.isfile(f"{metrics_out_dir}/metrics.tsv"):
                     if snp_stat.startswith("cov/"):
-                        cmd_coef = f"westminster_eqtl_gtex.py -g {args.gtex_vcf_dir}"
+                        cmd_metrics = f"westminster_eqtl_gtex.py -g {args.gtex_vcf_dir}"
                     else:
-                        cmd_coef = f"westminster_eqtl_gtexg.py -g {args.gtex_vcf_dir}"
-                    cmd_coef += f" -o {coef_out_dir}"
-                    cmd_coef += f" -s {snp_stat}"
-                    cmd_coef += f" {it_out_dir}"
+                        cmd_metrics = (
+                            f"westminster_eqtl_gtexg.py -g {args.gtex_vcf_dir}"
+                        )
+                    if args.ems:
+                        cmd_metrics += " --ems"
+                    cmd_metrics += f" -o {metrics_out_dir}"
+                    cmd_metrics += f" -s {snp_stat}"
+                    cmd_metrics += f" {it_out_dir}"
 
                     if args.local:
-                        jobs.append(cmd_coef)
+                        jobs.append(cmd_metrics)
                     else:
                         j = slurmrunner.Job(
-                            cmd_coef,
-                            "coef",
-                            f"{coef_out_dir}.out",
-                            f"{coef_out_dir}.err",
+                            cmd_metrics,
+                            "metrics",
+                            f"{metrics_out_dir}.out",
+                            f"{metrics_out_dir}.err",
                             queue="standard",
                             cpu=2,
                             mem=22000,
@@ -429,25 +448,27 @@ def main():
     # ensemble
     for snp_stat in snp_stats:
         stat_label = snp_stat.replace("/", "-")
-        coef_out_dir = f"{ens_out_dir}/coef-{stat_label}"
+        metrics_out_dir = f"{ens_out_dir}/metrics-{stat_label}"
 
-        if not os.path.isfile(f"{coef_out_dir}/metrics.tsv"):
+        if not os.path.isfile(f"{metrics_out_dir}/metrics.tsv"):
             if snp_stat.startswith("cov/"):
-                cmd_coef = f"westminster_eqtl_gtex.py -g {args.gtex_vcf_dir}"
+                cmd_metrics = f"westminster_eqtl_gtex.py -g {args.gtex_vcf_dir}"
             else:
-                cmd_coef = f"westminster_eqtl_gtexg.py -g {args.gtex_vcf_dir}"
-            cmd_coef += f" -o {coef_out_dir}"
-            cmd_coef += f" -s {snp_stat}"
-            cmd_coef += f" {ens_out_dir}"
+                cmd_metrics = f"westminster_eqtl_gtexg.py -g {args.gtex_vcf_dir}"
+            if args.ems:
+                cmd_metrics += " --ems"
+            cmd_metrics += f" -o {metrics_out_dir}"
+            cmd_metrics += f" -s {snp_stat}"
+            cmd_metrics += f" {ens_out_dir}"
 
             if args.local:
-                jobs.append(cmd_coef)
+                jobs.append(cmd_metrics)
             else:
                 j = slurmrunner.Job(
-                    cmd_coef,
-                    "coef",
-                    f"{coef_out_dir}.out",
-                    f"{coef_out_dir}.err",
+                    cmd_metrics,
+                    "metrics",
+                    f"{metrics_out_dir}.out",
+                    f"{metrics_out_dir}.err",
                     queue="standard",
                     cpu=2,
                     mem=22000,

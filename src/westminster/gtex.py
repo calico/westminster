@@ -83,6 +83,60 @@ txrev_keywords = {
 }
 
 
+gtexv11_keywords = {
+    "Adipose_Subcutaneous": "adipose",
+    "Adipose_Visceral_Omentum": "adipose",
+    "Adrenal_Gland": "adrenal_gland",
+    "Artery_Aorta": "heart",
+    "Artery_Coronary": "heart",
+    "Artery_Tibial": "heart",
+    "Bladder": "bladder",
+    "Brain_Amygdala": "brain",
+    "Brain_Anterior_cingulate_cortex_BA24": "brain",
+    "Brain_Caudate_basal_ganglia": "brain",
+    "Brain_Cerebellar_Hemisphere": "brain",
+    "Brain_Cerebellum": "brain",
+    "Brain_Cortex": "brain",
+    "Brain_Frontal_Cortex_BA9": "brain",
+    "Brain_Hippocampus": "brain",
+    "Brain_Hypothalamus": "brain",
+    "Brain_Nucleus_accumbens_basal_ganglia": "brain",
+    "Brain_Putamen_basal_ganglia": "brain",
+    "Brain_Spinal_cord_cervical_c-1": "brain",
+    "Brain_Substantia_nigra": "brain",
+    "Breast_Mammary_Tissue": "breast",
+    "Cells_Cultured_fibroblasts": "fibroblast",
+    "Cells_EBV-transformed_lymphocytes": "lcl",
+    "Colon_Sigmoid": "colon",
+    "Colon_Transverse": "colon",
+    "Esophagus_Gastroesophageal_Junction": "esophagus",
+    "Esophagus_Mucosa": "esophagus",
+    "Esophagus_Muscularis": "esophagus",
+    "Heart_Atrial_Appendage": "heart",
+    "Heart_Left_Ventricle": "heart",
+    "Kidney_Cortex": "kidney",
+    "Liver": "liver",
+    "Lung": "lung",
+    "Minor_Salivary_Gland": "salivary",
+    "Muscle_Skeletal": "muscle",
+    "Nerve_Tibial": "nerve",
+    "Ovary": "ovary",
+    "Pancreas": "pancreas",
+    "Pituitary": "pituitary",
+    "Prostate": "prostate",
+    "Skin_Not_Sun_Exposed_Suprapubic": "skin",
+    "Skin_Sun_Exposed_Lower_leg": "skin",
+    "Small_Intestine_Terminal_Ileum": "small_intestine",
+    "Spleen": "spleen",
+    "Stomach": "stomach",
+    "Testis": "testis",
+    "Thyroid": "thyroid",
+    "Uterus": "uterus",
+    "Vagina": "vagina",
+    "Whole_Blood": "blood",
+}
+
+
 def match_tissue_targets(targets_df, keyword, gene_targets=False, verbose=False):
     """Return array of target indices matching a GTEx tissue keyword."""
     target_ids = targets_df.identifier.values
@@ -104,6 +158,60 @@ def trim_dot(gene_id):
     if dot_i != -1:
         gene_id = gene_id[:dot_i]
     return gene_id
+
+
+def read_gene_tss(genes_bed_file: str):
+    """Build a lookup from trimmed gene ID to TSS position.
+
+    Args:
+        genes_bed_file: BED file with gene TSS positions.
+            Column 3 format: ENST.../ENSG.../SYMBOL
+
+    Returns:
+        Dictionary mapping trimmed ENSG ID to (chrom, tss_pos).
+    """
+    gene_tss = {}
+    for line in open(genes_bed_file):
+        fields = line.strip().split("\t")
+        chrom = fields[0]
+        tss_pos = (int(fields[1]) + int(fields[2])) // 2
+        name = fields[3]
+        ensg = name.split("/")[1]
+        ensg_trim = trim_dot(ensg)
+        if ensg_trim not in gene_tss:
+            gene_tss[ensg_trim] = (chrom, tss_pos)
+    return gene_tss
+
+
+def variant_pos(variant_id: str):
+    """Parse chromosome and position from variant ID (e.g. chr1_13550_G_A_b38)."""
+    parts = variant_id.split("_")
+    return parts[0], int(parts[1])
+
+
+def vcf_info_dist(vcf_file: str, tag: str):
+    """Return {variant_id: distance} parsed from a VCF INFO field tag.
+
+    Args:
+        vcf_file: VCF file path (supports ##header lines).
+        tag: INFO tag name to extract (e.g. 'SD' or 'PD').
+
+    Returns:
+        Dictionary mapping variant ID to integer distance.
+    """
+    dist_map = {}
+    prefix = f"{tag}="
+    for line in open(vcf_file):
+        if line.startswith("#"):
+            continue
+        fields = line.split("\t")
+        variant = fields[2]
+        info = fields[7]
+        for field in info.split(";"):
+            if field.startswith(prefix):
+                dist_map[variant] = int(field[len(prefix) :])
+                break
+    return dist_map
 
 
 def vcf_tss_dist(vcf_file, genes_bed_file):

@@ -29,7 +29,7 @@ from westminster.multi import nonzero_h5
 """
 westminster_eqtlsed_folds.py
 
-Benchmark Baskerville model replicates on GTEx eQTL coefficient task.
+Compute eQTL prediction metrics across Baskerville model replicates.
 """
 
 
@@ -391,7 +391,7 @@ def main():
             ensemble_h5(ens_neg_file, sed_neg_files, sed_stats)
 
     ################################################################
-    # coefficient analysis
+    # metrics
 
     cmd_base = "westminster_eqtl_gtexg.py -g %s" % options.gtex_vcf_dir
 
@@ -402,13 +402,15 @@ def main():
             it_out_dir = "%s/%s" % (it_dir, gtex_out_dir)
 
             for sed_stat in sed_stats:
-                coef_out_dir = f"{it_out_dir}/coef-{sed_stat}"
-                cmd_coef = f"{cmd_base} -o {coef_out_dir} -s {sed_stat} {it_out_dir}"
+                metrics_out_dir = f"{it_out_dir}/metrics-{sed_stat}"
+                cmd_metrics = (
+                    f"{cmd_base} -o {metrics_out_dir} -s {sed_stat} {it_out_dir}"
+                )
                 j = slurm.Job(
-                    cmd_coef,
-                    "coef",
-                    f"{coef_out_dir}.out",
-                    f"{coef_out_dir}.err",
+                    cmd_metrics,
+                    "metrics",
+                    f"{metrics_out_dir}.out",
+                    f"{metrics_out_dir}.err",
                     queue="standard",
                     cpu=2,
                     mem=22000,
@@ -419,13 +421,13 @@ def main():
     # ensemble
     it_out_dir = f"{exp_dir}/ensemble/{gtex_out_dir}"
     for sed_stat in sed_stats:
-        coef_out_dir = f"{it_out_dir}/coef-{sed_stat}"
-        cmd_coef = f"{cmd_base} -o {coef_out_dir} -s {sed_stat} {it_out_dir}"
+        metrics_out_dir = f"{it_out_dir}/metrics-{sed_stat}"
+        cmd_metrics = f"{cmd_base} -o {metrics_out_dir} -s {sed_stat} {it_out_dir}"
         j = slurm.Job(
-            cmd_coef,
-            "coef",
-            f"{coef_out_dir}.out",
-            f"{coef_out_dir}.err",
+            cmd_metrics,
+            "metrics",
+            f"{metrics_out_dir}.out",
+            f"{metrics_out_dir}.err",
             queue="standard",
             cpu=2,
             mem=22000,

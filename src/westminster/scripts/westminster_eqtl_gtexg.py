@@ -13,16 +13,17 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 
 from westminster.gtex import (
     match_tissue_targets,
+    read_gene_tss,
     tissue_keywords,
     trim_dot,
+    variant_pos,
     vcf_tss_dist,
 )
 
 """
 westminster_eqtl_gtexg.py
 
-Evaluate concordance of variant effect prediction sign classifcation
-and coefficient correlations.
+Score variant-effect predictions against GTEx eQTLs across multiple metrics.
 """
 
 
@@ -46,7 +47,7 @@ def main():
     parser.add_argument(
         "-o",
         "--out_dir",
-        default="coef_out",
+        default="metrics_out",
         help="Output directory for tissue metrics",
     )
     parser.add_argument(
@@ -54,6 +55,12 @@ def main():
         "--snp_stat",
         default="logSUM",
         help="SNP statistic. [Default: %(default)s]",
+    )
+    parser.add_argument(
+        "--ems",
+        action="store_true",
+        help="Use the legacy EMS pipeline: pull variant metadata from the "
+        "gtex_fine/tissues_susie/{tissue}.tsv tables instead of the VCF INFO.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("gtex_dir")
@@ -70,7 +77,11 @@ def main():
             print(tissue)
 
         # read causal variants
-        eqtl_df = read_eqtl(tissue, args.gtex_vcf_dir)
+        tissue_vcf_file = f"{args.gtex_vcf_dir}/{tissue}_pos.vcf"
+        if args.ems:
+            eqtl_df = read_eqtl_ems(tissue, args.gtex_vcf_dir)
+        else:
+            eqtl_df = read_eqtl_vcf(tissue_vcf_file)
         if eqtl_df is not None:
             # read model predictions
             gtex_scores_file = f"{args.gtex_dir}/{tissue}_pos/scores.h5"
@@ -241,35 +252,6 @@ def main():
     print("Measured Class AUPRC: %.4f" % np.mean(metrics_df.measured_auprc_class))
 
 
-def read_gene_tss(genes_bed_file: str):
-    """Build a lookup from trimmed gene ID to TSS position.
-
-    Args:
-        genes_bed_file: BED file with gene TSS positions.
-            Column 3 format: ENST.../ENSG.../SYMBOL
-
-    Returns:
-        Dictionary mapping trimmed ENSG ID to (chrom, tss_pos).
-    """
-    gene_tss = {}
-    for line in open(genes_bed_file):
-        fields = line.strip().split("\t")
-        chrom = fields[0]
-        tss_pos = (int(fields[1]) + int(fields[2])) // 2
-        name = fields[3]
-        ensg = name.split("/")[1]
-        ensg_trim = trim_dot(ensg)
-        if ensg_trim not in gene_tss:
-            gene_tss[ensg_trim] = (chrom, tss_pos)
-    return gene_tss
-
-
-def variant_pos(variant_id: str):
-    """Parse chromosome and position from variant ID (e.g. chr1_13550_G_A_b38)."""
-    parts = variant_id.split("_")
-    return parts[0], int(parts[1])
-
-
 def compute_eqtl_tss_dist(eqtl_df: pd.DataFrame, gene_tss: dict):
     """Compute distance from each variant to its eQTL gene's TSS.
 
@@ -291,7 +273,27 @@ def compute_eqtl_tss_dist(eqtl_df: pd.DataFrame, gene_tss: dict):
     return dists
 
 
-def read_eqtl(tissue: str, gtex_vcf_dir: str, pip_t: float = 0.9):
+def read_eqtl_vcf(tissue_vcf_file: str):
+    """Read eQTLs from the new gtex_eqtl VCF (INFO carries GENE, AFC)."""
+    if not os.path.isfile(tissue_vcf_file):
+        return None
+    rows = []
+    for line in open(tissue_vcf_file):
+        if line.startswith("#"):
+            continue
+        cols = line.rstrip("\n").split("\t")
+        vid = cols[2]
+        ref = cols[3]
+        info = dict(f.split("=", 1) for f in cols[7].split(";") if "=" in f)
+        gene = trim_dot(info.get("GENE", ""))
+        afc = float(info["AFC"])
+        if not gene:
+            continue
+        rows.append({"variant": vid, "gene": gene, "coef": afc, "allele1": ref})
+    return pd.DataFrame(rows) if rows else None
+
+
+def read_eqtl_ems(tissue: str, gtex_vcf_dir: str, pip_t: float = 0.9):
     """Reads eQTLs from SUSIE output.
 
     Args:
