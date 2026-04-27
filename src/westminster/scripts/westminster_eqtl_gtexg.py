@@ -62,6 +62,22 @@ def main():
         help="Use the legacy EMS pipeline: pull variant metadata from the "
         "gtex_fine/tissues_susie/{tissue}.tsv tables instead of the VCF INFO.",
     )
+    parser.add_argument(
+        "--egene",
+        action="store_true",
+        help="Also evaluate eGene assignment: among cis candidates of each "
+        "fine-mapped variant, can the model rank the true eGene? "
+        "Outputs go to {out_dir}/egene/.",
+    )
+    parser.add_argument(
+        "--egene_window",
+        type=int,
+        default=384_000,
+        help="Cis window (+/- bp around variant) for enumerating eGene "
+        "candidates. Defaults to half the new-model sequence length (~768 kb); "
+        "candidates beyond the model's predictable window get no score and are "
+        "excluded from metrics.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("gtex_dir")
     args = parser.parse_args()
@@ -69,8 +85,11 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
 
     gene_tss = read_gene_tss(args.genes_bed_file)
+    chrom_tss = _index_tss_by_chrom(gene_tss) if args.egene else None
 
     metrics_rows = []
+    egene_metrics_rows = []
+    egene_dist_rows = []
 
     for tissue, keyword in tissue_keywords.items():
         if args.verbose:
@@ -209,6 +228,22 @@ def main():
             )
             scatter_df.to_csv(f"{args.out_dir}/{tissue}.tsv", index=False, sep="\t")
 
+            # eGene assignment evaluation (opt-in)
+            if args.egene:
+                tissue_egene, dist_rows = egene_evaluate(
+                    tissue=tissue,
+                    eqtl_df=eqtl_df,
+                    gtex_scores_file=gtex_scores_file,
+                    keyword=keyword,
+                    score_key=args.snp_stat,
+                    chrom_tss=chrom_tss,
+                    window=args.egene_window,
+                    out_dir=f"{args.out_dir}/egene",
+                )
+                if tissue_egene is not None:
+                    egene_metrics_rows.append(tissue_egene)
+                    egene_dist_rows.extend(dist_rows)
+
             # save metrics
             metrics_rows.append(
                 {
@@ -250,6 +285,28 @@ def main():
     print("Measured SpearmanR:   %.4f" % np.mean(metrics_df.measured_spearmanr))
     print("Measured Class AUROC: %.4f" % np.mean(metrics_df.measured_auroc_class))
     print("Measured Class AUPRC: %.4f" % np.mean(metrics_df.measured_auprc_class))
+
+    if args.egene:
+        egene_dir = f"{args.out_dir}/egene"
+        os.makedirs(egene_dir, exist_ok=True)
+        egene_df = pd.DataFrame(egene_metrics_rows)
+        egene_df.to_csv(
+            f"{egene_dir}/metrics.tsv", sep="\t", index=False, float_format="%.4f"
+        )
+        if egene_dist_rows:
+            pd.DataFrame(egene_dist_rows).to_csv(
+                f"{egene_dir}/metrics_by_distance.tsv",
+                sep="\t",
+                index=False,
+                float_format="%.4f",
+            )
+        if not egene_df.empty:
+            print("eGene AUROC:        %.4f" % np.nanmean(egene_df.auroc))
+            print("eGene AUPRC:        %.4f" % np.nanmean(egene_df.auprc))
+            print("eGene top-1:        %.4f" % np.nanmean(egene_df.top1))
+            print("eGene top-3:        %.4f" % np.nanmean(egene_df.top3))
+            print("Distance AUROC:     %.4f" % np.nanmean(egene_df.baseline_auroc))
+            print("Distance top-1:     %.4f" % np.nanmean(egene_df.baseline_top1))
 
 
 def compute_eqtl_tss_dist(eqtl_df: pd.DataFrame, gene_tss: dict):
@@ -499,6 +556,203 @@ def _aggregate_scores_across_genes(data: dict, match_tis: np.ndarray):
         snp_scores[snp] += np.abs(score)
 
     return snp_scores, scored_snps
+
+
+def _index_tss_by_chrom(gene_tss: dict):
+    """Bucket gene_tss by chromosome and sort by TSS position for cis lookups.
+
+    Args:
+        gene_tss: {trimmed_ensg: (chrom, tss_pos)} from read_gene_tss().
+
+    Returns:
+        {chrom: (positions_array, gene_ids_array)} both sorted by position.
+    """
+    by_chrom = {}
+    for ensg, (chrom, tss) in gene_tss.items():
+        by_chrom.setdefault(chrom, []).append((tss, ensg))
+    out = {}
+    for chrom, entries in by_chrom.items():
+        entries.sort(key=lambda x: x[0])
+        positions = np.array([e[0] for e in entries], dtype=np.int64)
+        genes = np.array([e[1] for e in entries], dtype=object)
+        out[chrom] = (positions, genes)
+    return out
+
+
+# Distance bins (lower-inclusive, upper-exclusive) for stratified eGene metrics.
+EGENE_DIST_BINS = [
+    ("0_1k", 0, 1_000),
+    ("1k_10k", 1_000, 10_000),
+    ("10k_50k", 10_000, 50_000),
+    ("50k_100k", 50_000, 100_000),
+    ("100k_200k", 100_000, 200_000),
+    ("200k_400k", 200_000, 400_000),
+]
+
+
+def egene_evaluate(
+    tissue: str,
+    eqtl_df: pd.DataFrame,
+    gtex_scores_file: str,
+    keyword: str,
+    score_key: str,
+    chrom_tss: dict,
+    window: int,
+    out_dir: str,
+):
+    """Evaluate eGene assignment for one tissue.
+
+    For each fine-mapped variant, enumerate all protein-coding gene candidates
+    whose TSS falls within +/- `window` bp, label each (variant, gene) by
+    whether it's the true eGene, score with the model, and report AUROC/AUPRC
+    (pooled and per distance bin) plus per-variant top-1/top-3 accuracy.
+
+    Args:
+        tissue: tissue name (used in output filenames + metrics row).
+        eqtl_df: rows of (variant, gene, ...) from read_eqtl_vcf — the
+            positives.
+        gtex_scores_file: path to gene-pair-indexed HDF5 for this tissue.
+        keyword: tissue keyword for matching model targets.
+        score_key: HDF5 stat to read (e.g. "gene/logFC").
+        chrom_tss: output of _index_tss_by_chrom — sorted TSS table per chrom.
+        window: cis half-window in bp.
+        out_dir: directory for {tissue}_pairs.tsv (created if missing).
+
+    Returns:
+        (metrics_row, dist_rows): per-tissue summary dict and a list of per-bin
+        rows. (None, []) if the tissue has no usable scored pairs.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+
+    match_tis = _match_tissue_targets(gtex_scores_file, keyword, score_key)
+    data = _load_hdf5_data(gtex_scores_file, score_key)
+
+    # positives: {(variant, gene_trim)} — variant may have multiple eGenes
+    positive_pairs = set(zip(eqtl_df.variant, eqtl_df.gene))
+    variants = eqtl_df.variant.unique()
+
+    pair_rows = []
+    for variant in variants:
+        chrom, vpos = variant_pos(variant)
+        if chrom not in chrom_tss:
+            continue
+        positions, gene_arr = chrom_tss[chrom]
+        lo = np.searchsorted(positions, vpos - window, side="left")
+        hi = np.searchsorted(positions, vpos + window, side="right")
+        if lo == hi:
+            continue
+
+        si = data["snp_to_index"].get(variant)
+        for j in range(lo, hi):
+            gene = str(gene_arr[j])
+            tss = int(positions[j])
+            tss_dist = vpos - tss  # signed (positive => downstream of TSS)
+            label = 1 if (variant, gene) in positive_pairs else 0
+            score = np.nan
+            in_window = False
+            if si is not None:
+                gi = data["trimmed_to_index"].get(gene)
+                if gi is not None:
+                    row = data["pair_row"].get((si, gi))
+                    if row is not None:
+                        vals = data["stat_matrix"][row, match_tis].astype("float32")
+                        score = float(np.abs(np.mean(vals)))
+                        in_window = True
+            pair_rows.append(
+                {
+                    "variant": variant,
+                    "gene": gene,
+                    "tss_dist": tss_dist,
+                    "abs_tss_dist": abs(tss_dist),
+                    "label": label,
+                    "score": score,
+                    "in_window": in_window,
+                    "baseline": 1.0 / (abs(tss_dist) + 1),
+                }
+            )
+
+    if not pair_rows:
+        return None, []
+
+    pairs_df = pd.DataFrame(pair_rows)
+    pairs_df.to_csv(
+        f"{out_dir}/{tissue}_pairs.tsv", sep="\t", index=False, float_format="%.6g"
+    )
+
+    # pooled metrics on scored pairs only
+    scored = pairs_df[pairs_df.in_window]
+    auroc, auprc = _safe_binary_metrics(scored.label, scored.score)
+    base_auroc, base_auprc = _safe_binary_metrics(scored.label, scored.baseline)
+    top1 = _topk_accuracy(scored, "score", 1)
+    top3 = _topk_accuracy(scored, "score", 3)
+    base_top1 = _topk_accuracy(scored, "baseline", 1)
+    base_top3 = _topk_accuracy(scored, "baseline", 3)
+
+    metrics_row = {
+        "tissue": tissue,
+        "n_variants": int(scored.variant.nunique()),
+        "n_pairs": int(len(pairs_df)),
+        "n_scored": int(len(scored)),
+        "n_pos": int(scored.label.sum()),
+        "coverage": float(len(scored) / len(pairs_df)),
+        "auroc": auroc,
+        "auprc": auprc,
+        "top1": top1,
+        "top3": top3,
+        "baseline_auroc": base_auroc,
+        "baseline_auprc": base_auprc,
+        "baseline_top1": base_top1,
+        "baseline_top3": base_top3,
+    }
+
+    dist_rows = []
+    for label, lo, hi in EGENE_DIST_BINS:
+        sub = scored[(scored.abs_tss_dist >= lo) & (scored.abs_tss_dist < hi)]
+        b_auroc, b_auprc = _safe_binary_metrics(sub.label, sub.score)
+        d_auroc, d_auprc = _safe_binary_metrics(sub.label, sub.baseline)
+        dist_rows.append(
+            {
+                "tissue": tissue,
+                "bin": label,
+                "n_pairs": int(len(sub)),
+                "n_pos": int(sub.label.sum()),
+                "auroc": b_auroc,
+                "auprc": b_auprc,
+                "baseline_auroc": d_auroc,
+                "baseline_auprc": d_auprc,
+            }
+        )
+
+    return metrics_row, dist_rows
+
+
+def _safe_binary_metrics(labels, scores):
+    """Return (AUROC, AUPRC) or (NaN, NaN) if labels lack both classes."""
+    labels = np.asarray(labels)
+    scores = np.asarray(scores, dtype=float)
+    mask = ~np.isnan(scores)
+    labels = labels[mask]
+    scores = scores[mask]
+    if len(labels) == 0 or labels.min() == labels.max():
+        return float("nan"), float("nan")
+    return roc_auc_score(labels, scores), average_precision_score(labels, scores)
+
+
+def _topk_accuracy(scored: pd.DataFrame, score_col: str, k: int):
+    """Fraction of variants whose top-k candidates (by score_col) include a positive.
+
+    Variants with no positive among scored candidates are skipped.
+    """
+    hits = 0
+    n = 0
+    for _, group in scored.groupby("variant", sort=False):
+        if group.label.sum() == 0:
+            continue
+        top = group.nlargest(k, score_col)
+        n += 1
+        if top.label.sum() > 0:
+            hits += 1
+    return float(hits / n) if n else float("nan")
 
 
 def read_snp_scores(gtex_scores_file, keyword, score_key="logSUM"):

@@ -422,7 +422,8 @@ def main():
                         cmd_metrics = f"westminster_eqtl_gtex.py -g {args.gtex_vcf_dir}"
                     else:
                         cmd_metrics = (
-                            f"westminster_eqtl_gtexg.py -g {args.gtex_vcf_dir}"
+                            f"westminster_eqtl_gtexg.py --egene"
+                            f" -g {args.gtex_vcf_dir}"
                         )
                     if args.ems:
                         cmd_metrics += " --ems"
@@ -454,7 +455,9 @@ def main():
             if snp_stat.startswith("cov/"):
                 cmd_metrics = f"westminster_eqtl_gtex.py -g {args.gtex_vcf_dir}"
             else:
-                cmd_metrics = f"westminster_eqtl_gtexg.py -g {args.gtex_vcf_dir}"
+                cmd_metrics = (
+                    f"westminster_eqtl_gtexg.py --egene -g {args.gtex_vcf_dir}"
+                )
             if args.ems:
                 cmd_metrics += " --ems"
             cmd_metrics += f" -o {metrics_out_dir}"
