@@ -260,7 +260,9 @@ def main():
     # count folds
     if args.num_folds is None:
         head = 0 if args.data_head is None else args.data_head
-        args.num_folds = utils.detect_model_folds(exp_dir, filename=f"model{head}_best.h5")
+        args.num_folds = utils.detect_model_folds(
+            exp_dir, filename=f"model{head}_best.h5"
+        )
         print(f"Found {args.num_folds} folds")
         if args.num_folds == 0:
             raise ValueError(f"No TF models found in {exp_dir}")
@@ -473,7 +475,9 @@ def main():
                         if args.class_name is not None:
                             class_out_dir += f"-{args.class_name}"
                         if not os.path.isfile(f"{class_out_dir}/stats.txt"):
-                            cmd_class = f"{cmd_base} -o {class_out_dir} --stat {snp_stat}"
+                            cmd_class = (
+                                f"{cmd_base} -o {class_out_dir} --stat {snp_stat}"
+                            )
                             cmd_class += f" {sad_pos} {sad_neg}"
                             if args.local:
                                 jobs.append(cmd_class)
@@ -538,7 +542,9 @@ def main():
                 stat_label = snp_stat.replace("/", "-")
                 metrics_out_dir = f"{it_out_dir}/metrics-{stat_label}"
                 if not os.path.isfile(f"{metrics_out_dir}/metrics.tsv"):
-                    cmd_metrics = f"{cmd_base} -o {metrics_out_dir} -s {snp_stat} {it_out_dir}"
+                    cmd_metrics = (
+                        f"{cmd_base} -o {metrics_out_dir} -s {snp_stat} {it_out_dir}"
+                    )
                     if args.local:
                         jobs.append(cmd_metrics)
                     else:
@@ -691,9 +697,7 @@ def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats: list):
         )
 
         for tissue_vcf in glob.glob(f"{vcf_dir}/*_{posneg}.vcf"):
-            tissue_label = os.path.basename(tissue_vcf).replace(
-                f"_{posneg}.vcf", ""
-            )
+            tissue_label = os.path.basename(tissue_vcf).replace(f"_{posneg}.vcf", "")
 
             snp_ids, chrs, poss, refs, alts = [], [], [], [], []
             for line in open(tissue_vcf):
@@ -716,15 +720,9 @@ def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats: list):
             with h5py.File(f"{tissue_dir}/scores.h5", "w") as th5:
                 th5.create_dataset("snp", data=np.array(snp_ids, dtype="S"))
                 th5.create_dataset("chr", data=np.array(chrs, dtype="S"))
-                th5.create_dataset(
-                    "pos", data=np.array(poss, dtype="uint32")
-                )
-                th5.create_dataset(
-                    "ref_allele", data=np.array(refs, dtype="S")
-                )
-                th5.create_dataset(
-                    "alt_allele", data=np.array(alts, dtype="S")
-                )
+                th5.create_dataset("pos", data=np.array(poss, dtype="uint32"))
+                th5.create_dataset("ref_allele", data=np.array(refs, dtype="S"))
+                th5.create_dataset("alt_allele", data=np.array(alts, dtype="S"))
                 for ss in snp_stats:
                     th5.create_dataset(ss, data=merge_scores[ss][idxs])
 
