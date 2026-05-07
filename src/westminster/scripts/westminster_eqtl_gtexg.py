@@ -63,13 +63,6 @@ def main():
         "gtex_fine/tissues_susie/{tissue}.tsv tables instead of the VCF INFO.",
     )
     parser.add_argument(
-        "--egene",
-        action="store_true",
-        help="Also evaluate eGene assignment: among cis candidates of each "
-        "fine-mapped variant, can the model rank the true eGene? "
-        "Outputs go to {out_dir}/egene/.",
-    )
-    parser.add_argument(
         "--egene_window",
         type=int,
         default=384_000,
@@ -85,7 +78,7 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
 
     gene_tss = read_gene_tss(args.genes_bed_file)
-    chrom_tss = _index_tss_by_chrom(gene_tss) if args.egene else None
+    chrom_tss = _index_tss_by_chrom(gene_tss)
 
     metrics_rows = []
     egene_metrics_rows = []
@@ -228,21 +221,20 @@ def main():
             )
             scatter_df.to_csv(f"{args.out_dir}/{tissue}.tsv", index=False, sep="\t")
 
-            # eGene assignment evaluation (opt-in)
-            if args.egene:
-                tissue_egene, dist_rows = egene_evaluate(
-                    tissue=tissue,
-                    eqtl_df=eqtl_df,
-                    gtex_scores_file=gtex_scores_file,
-                    keyword=keyword,
-                    score_key=args.snp_stat,
-                    chrom_tss=chrom_tss,
-                    window=args.egene_window,
-                    out_dir=f"{args.out_dir}/egene",
-                )
-                if tissue_egene is not None:
-                    egene_metrics_rows.append(tissue_egene)
-                    egene_dist_rows.extend(dist_rows)
+            # eGene assignment evaluation
+            tissue_egene, dist_rows = egene_evaluate(
+                tissue=tissue,
+                eqtl_df=eqtl_df,
+                gtex_scores_file=gtex_scores_file,
+                keyword=keyword,
+                score_key=args.snp_stat,
+                chrom_tss=chrom_tss,
+                window=args.egene_window,
+                out_dir=f"{args.out_dir}/egene",
+            )
+            if tissue_egene is not None:
+                egene_metrics_rows.append(tissue_egene)
+                egene_dist_rows.extend(dist_rows)
 
             # save metrics
             metrics_rows.append(
@@ -286,27 +278,26 @@ def main():
     print("Measured Class AUROC: %.4f" % np.mean(metrics_df.measured_auroc_class))
     print("Measured Class AUPRC: %.4f" % np.mean(metrics_df.measured_auprc_class))
 
-    if args.egene:
-        egene_dir = f"{args.out_dir}/egene"
-        os.makedirs(egene_dir, exist_ok=True)
-        egene_df = pd.DataFrame(egene_metrics_rows)
-        egene_df.to_csv(
-            f"{egene_dir}/metrics.tsv", sep="\t", index=False, float_format="%.4f"
+    egene_dir = f"{args.out_dir}/egene"
+    os.makedirs(egene_dir, exist_ok=True)
+    egene_df = pd.DataFrame(egene_metrics_rows)
+    egene_df.to_csv(
+        f"{egene_dir}/metrics.tsv", sep="\t", index=False, float_format="%.4f"
+    )
+    if egene_dist_rows:
+        pd.DataFrame(egene_dist_rows).to_csv(
+            f"{egene_dir}/metrics_by_distance.tsv",
+            sep="\t",
+            index=False,
+            float_format="%.4f",
         )
-        if egene_dist_rows:
-            pd.DataFrame(egene_dist_rows).to_csv(
-                f"{egene_dir}/metrics_by_distance.tsv",
-                sep="\t",
-                index=False,
-                float_format="%.4f",
-            )
-        if not egene_df.empty:
-            print("eGene AUROC:        %.4f" % np.nanmean(egene_df.auroc))
-            print("eGene AUPRC:        %.4f" % np.nanmean(egene_df.auprc))
-            print("eGene top-1:        %.4f" % np.nanmean(egene_df.top1))
-            print("eGene top-3:        %.4f" % np.nanmean(egene_df.top3))
-            print("Distance AUROC:     %.4f" % np.nanmean(egene_df.baseline_auroc))
-            print("Distance top-1:     %.4f" % np.nanmean(egene_df.baseline_top1))
+    if not egene_df.empty:
+        print("eGene AUROC:        %.4f" % np.nanmean(egene_df.auroc))
+        print("eGene AUPRC:        %.4f" % np.nanmean(egene_df.auprc))
+        print("eGene top-1:        %.4f" % np.nanmean(egene_df.top1))
+        print("eGene top-3:        %.4f" % np.nanmean(egene_df.top3))
+        print("Distance AUROC:     %.4f" % np.nanmean(egene_df.baseline_auroc))
+        print("Distance top-1:     %.4f" % np.nanmean(egene_df.baseline_top1))
 
 
 def compute_eqtl_tss_dist(eqtl_df: pd.DataFrame, gene_tss: dict):
@@ -602,7 +593,7 @@ def egene_evaluate(
 ):
     """Evaluate eGene assignment for one tissue.
 
-    For each fine-mapped variant, enumerate all protein-coding gene candidates
+    For each fine-mapped variant, enumerate all gene candidates in `chrom_tss`
     whose TSS falls within +/- `window` bp, label each (variant, gene) by
     whether it's the true eGene, score with the model, and report AUROC/AUPRC
     (pooled and per distance bin) plus per-variant top-1/top-3 accuracy.
@@ -681,6 +672,8 @@ def egene_evaluate(
 
     # pooled metrics on scored pairs only
     scored = pairs_df[pairs_df.in_window]
+    if scored.empty:
+        return None, []
     auroc, auprc = _safe_binary_metrics(scored.label, scored.score)
     base_auroc, base_auprc = _safe_binary_metrics(scored.label, scored.baseline)
     top1 = _topk_accuracy(scored, "score", 1)
