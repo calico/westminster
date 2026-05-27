@@ -120,8 +120,18 @@ def main():
         action="store_true",
         help="Use XGBoost [Default: %default]",
     )
+    parser.add_option(
+        "--lgbm",
+        dest="lgbm",
+        default=False,
+        action="store_true",
+        help="Use LightGBM [Default: %default]",
+    )
     parser.add_option("-t", dest="targets_file", default=None)
     (options, args) = parser.parse_args()
+
+    if options.xgboost and options.lgbm:
+        parser.error("Options --xgboost and --lgbm are mutually exclusive.")
 
     if len(args) != 2:
         parser.error("Must provide positive and negative variant predictions.")
@@ -199,6 +209,17 @@ def main():
                 learning_rate=options.learning_rate,
                 random_state=options.random_seed,
             )
+        elif options.lgbm:
+            aurocs, fpr_folds, tpr_folds, fpr_mean, tpr_mean, preds = folds_lgbm(
+                X,
+                y,
+                folds=options.num_folds,
+                iterations=options.iterations,
+                n_estimators=options.n_estimators,
+                max_depth=options.max_depth,
+                learning_rate=options.learning_rate,
+                random_state=options.random_seed,
+            )
         else:
             aurocs, auprcs, fpr_folds, tpr_folds, fpr_mean, tpr_mean, preds = (
                 folds_randfor(
@@ -225,6 +246,14 @@ def main():
                 max_depth=options.max_depth,
                 learning_rate=options.learning_rate,
             )
+        elif options.lgbm:
+            model = full_lgbm(
+                X,
+                y,
+                n_estimators=options.n_estimators,
+                max_depth=options.max_depth,
+                learning_rate=options.learning_rate,
+            )
         else:
             model = full_randfor(
                 X, y, n_estimators=options.n_estimators, min_samples_leaf=options.msl
@@ -234,7 +263,11 @@ def main():
         # save model hyperparameters for reproducibility
         model_params = model.get_params() if hasattr(model, "get_params") else {}
         meta = {
-            "classifier": "xgboost" if options.xgboost else "random_forest",
+            "classifier": (
+                "xgboost"
+                if options.xgboost
+                else "lightgbm" if options.lgbm else "random_forest"
+            ),
             "model_params": model_params,
             "folds": options.num_folds,
             "iterations": options.iterations,
@@ -577,6 +610,143 @@ def full_xgboost(
     )
     model.fit(X, y)
     return model
+
+
+def folds_lgbm(
+    X: np.array,
+    y: np.array,
+    folds: int = 8,
+    iterations: int = 1,
+    n_estimators: int = 32,
+    max_depth: int = 4,
+    learning_rate: float = 0.05,
+    random_state: int = 44,
+):
+    """
+    Fit LightGBM classifiers in cross-validation.
+
+    Args:
+      X (:obj:`np.array`):
+        Feature matrix.
+      y (:obj:`np.array`):
+        Target values.
+      folds (:obj:`int`):
+        Cross folds.
+      iterations (:obj:`int`):
+        Cross fold iterations.
+      n_estimators (:obj:`int`):
+        Number of boosting rounds.
+      max_depth (:obj:`int`):
+        Maximum tree depth.
+      learning_rate (:obj:`float`):
+        Boosting learning rate.
+      random_state (:obj:`int`):
+        Random state.
+    """
+    lgb = _import_lightgbm()
+
+    aurocs = []
+    fpr_folds = []
+    tpr_folds = []
+    fpr_fulls = []
+    tpr_fulls = []
+    preds_return = []
+
+    fpr_mean = np.linspace(0, 1, 256)
+    tpr_mean = []
+
+    for i in tqdm(range(iterations)):
+        rs_iter = random_state + i
+        preds_full = np.zeros(y.shape)
+
+        kf = KFold(n_splits=folds, shuffle=True, random_state=rs_iter)
+
+        for train_index, test_index in kf.split(X):
+            rs_rf = None if random_state is None else rs_iter + test_index[0]
+
+            model = lgb.LGBMClassifier(
+                n_estimators=n_estimators,
+                max_depth=max_depth,
+                learning_rate=learning_rate,
+                n_jobs=-1,
+                random_state=rs_rf,
+                verbose=-1,
+            )
+            model.fit(X[train_index, :], y[train_index])
+
+            preds = model.predict_proba(X[test_index, :])[:, 1]
+            preds_full[test_index] = preds.squeeze()
+
+            fpr, tpr, _ = roc_curve(y[test_index], preds)
+            fpr_folds.append(fpr)
+            tpr_folds.append(tpr)
+
+            interp_tpr = np.interp(fpr_mean, fpr, tpr)
+            interp_tpr[0] = 0.0
+            tpr_mean.append(interp_tpr)
+
+            aurocs.append(roc_auc_score(y[test_index], preds))
+
+        fpr_full, tpr_full, _ = roc_curve(y, preds_full)
+        fpr_fulls.append(fpr_full)
+        tpr_fulls.append(tpr_full)
+        preds_return.append(preds_full)
+
+    aurocs = np.array(aurocs)
+    tpr_mean = np.array(tpr_mean).mean(axis=0)
+    preds_return = np.array(preds_return).T
+
+    return aurocs, fpr_folds, tpr_folds, fpr_mean, tpr_mean, preds_return
+
+
+def full_lgbm(
+    X: np.array,
+    y: np.array,
+    n_estimators: int = 32,
+    max_depth: int = 4,
+    learning_rate: float = 0.05,
+    random_state: int = 44,
+):
+    """
+    Fit a single LightGBM classifier on the full data.
+
+    Args:
+      X (:obj:`np.array`):
+        Feature matrix.
+      y (:obj:`np.array`):
+        Target values.
+      n_estimators (:obj:`int`):
+        Number of boosting rounds.
+      max_depth (:obj:`int`):
+        Maximum tree depth.
+      learning_rate (:obj:`float`):
+        Boosting learning rate.
+      random_state (:obj:`int`):
+        Random state.
+    """
+    lgb = _import_lightgbm()
+
+    model = lgb.LGBMClassifier(
+        n_estimators=n_estimators,
+        max_depth=max_depth,
+        learning_rate=learning_rate,
+        n_jobs=-1,
+        random_state=random_state,
+        verbose=-1,
+    )
+    model.fit(X, y)
+    return model
+
+
+def _import_lightgbm():
+    """Import LightGBM only when needed for --lgbm workflows."""
+    try:
+        import lightgbm as lgb
+    except ImportError as exc:
+        raise ImportError(
+            "LightGBM is required for --lgbm. Install it with `pip install lightgbm`."
+        ) from exc
+    return lgb
 
 
 def plot_roc(fprs: np.array, tprs: np.array, out_dir: str):

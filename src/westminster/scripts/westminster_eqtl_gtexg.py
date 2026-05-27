@@ -7,7 +7,6 @@ import sys
 import h5py
 import numpy as np
 import pandas as pd
-import pybedtools
 from scipy.stats import spearmanr
 from sklearn.metrics import average_precision_score, roc_auc_score
 
@@ -17,7 +16,6 @@ from westminster.gtex import (
     tissue_keywords,
     trim_dot,
     variant_pos,
-    vcf_tss_dist,
 )
 
 """
@@ -41,7 +39,7 @@ def main():
     parser.add_argument(
         "-g",
         "--gtex_vcf_dir",
-        default="/home/drk/seqnn/data/gtex_fine/susie_pip90r",
+        default="/home/drk/seqnn/data/gtex_v11/eqtl_pip90",
         help="GTEx VCF directory",
     )
     parser.add_argument(
@@ -53,7 +51,7 @@ def main():
     parser.add_argument(
         "-s",
         "--snp_stat",
-        default="logSUM",
+        default="covgene/logFC",
         help="SNP statistic. [Default: %(default)s]",
     )
     parser.add_argument(
@@ -125,98 +123,46 @@ def main():
             )
             coef_r_meas = spearmanr(eqtl_meas_df.coef, eqtl_meas_df.score)[0]
 
-            # read pos+neg per-SNP aggregated scores
-            psnp_scores, _ = read_snp_scores(gtex_scores_file, keyword, args.snp_stat)
+            # score negatives at their assigned gene (INFO GENE=) on the neg
+            # HDF5, exactly as positives are scored at their eQTL gene
             gtex_nscores_file = gtex_scores_file.replace("_pos", "_neg")
-            nsnp_scores, neg_scored_snps = read_snp_scores(
-                gtex_nscores_file, keyword, args.snp_stat
+            neg_df = read_neg_vcf(f"{args.gtex_vcf_dir}/{tissue}_neg.vcf")
+            if neg_df is None:
+                print(f"Skipping {tissue}: no negatives.", file=sys.stderr)
+                continue
+            neg_df = add_scores(
+                gtex_nscores_file, keyword, neg_df, args.snp_stat, verbose=args.verbose
             )
+            neg_meas_df = neg_df[neg_df.measured]
 
-            # classification AUROC
-            Xp = list(psnp_scores.values())
-            Xn = list(nsnp_scores.values())
-            class_labels = [1] * len(Xp) + [0] * len(Xn)
-            class_scores = Xp + Xn
+            # classification AUROC/AUPRC: |gene-specific logFC| at each
+            # variant's single designated gene, positives vs negatives
+            Xp = np.abs(eqtl_df.score.values)
+            Xn = np.abs(neg_df.score.values)
+            class_labels = np.r_[np.ones(len(Xp)), np.zeros(len(Xn))]
+            class_scores = np.r_[Xp, Xn]
             class_auroc = roc_auc_score(class_labels, class_scores)
             class_auprc = average_precision_score(class_labels, class_scores)
 
-            # measured classification AUROC
-            measured_snps = set(eqtl_meas_df.variant)
-            Xp_m = [v for s, v in psnp_scores.items() if s in measured_snps]
-            Xn_m = [v for s, v in nsnp_scores.items() if s in neg_scored_snps]
-            class_labels_meas = [1] * len(Xp_m) + [0] * len(Xn_m)
-            class_scores_meas = Xp_m + Xn_m
+            # measured classification: restrict each side to in-window variants
+            Xp_m = np.abs(eqtl_meas_df.score.values)
+            Xn_m = np.abs(neg_meas_df.score.values)
+            class_labels_meas = np.r_[np.ones(len(Xp_m)), np.zeros(len(Xn_m))]
+            class_scores_meas = np.r_[Xp_m, Xn_m]
             class_auroc_meas = roc_auc_score(class_labels_meas, class_scores_meas)
             class_auprc_meas = average_precision_score(
                 class_labels_meas, class_scores_meas
             )
 
-            # compute TSS distances (dict-based: eqtl_df order != VCF order)
-            tissue_vcf_file = f"{args.gtex_vcf_dir}/{tissue}_pos.vcf"
-            pos_tss_arr = vcf_tss_dist(tissue_vcf_file, args.genes_bed_file)
-            pos_vcf_variants = [
-                line.split()[2]
-                for line in open(tissue_vcf_file)
-                if not line.startswith("##")
-            ]
-            pos_tss_map = dict(zip(pos_vcf_variants, pos_tss_arr))
-
-            neg_vcf_file = f"{args.gtex_vcf_dir}/{tissue}_neg.vcf"
-            neg_tss_arr = vcf_tss_dist(neg_vcf_file, args.genes_bed_file)
-            neg_vcf_variants = [
-                line.split()[2]
-                for line in open(neg_vcf_file)
-                if not line.startswith("##")
-            ]
-            neg_tss_map = dict(zip(neg_vcf_variants, neg_tss_arr))
-
-            # compute eQTL-gene TSS distances before grouping
-            eqtl_df["tss_dist_eqtl"] = compute_eqtl_tss_dist(eqtl_df, gene_tss)
-
-            # write combined variant table
-            pos_var_df = (
-                eqtl_df.groupby("variant", sort=False)
-                .agg(
-                    coef=("coef", "mean"),
-                    pred=("score", "mean"),
-                    tss_dist_eqtl=("tss_dist_eqtl", "min"),
-                )
-                .reset_index()
+            # write combined variant table: one designated-gene score per
+            # variant (pos = eQTL gene, neg = assigned gene)
+            pos_var_df = eqtl_df.rename(columns={"score": "pred"}).assign(label="pos")
+            neg_var_df = neg_df.rename(columns={"score": "pred"}).assign(
+                label="neg", coef=np.nan
             )
-            pos_var_df = pos_var_df[pos_var_df.variant.isin(pos_tss_map)]
-            pos_var_df["pred_agg"] = [
-                psnp_scores.get(v, 0.0) for v in pos_var_df.variant
-            ]
-            pos_var_df["tss_dist"] = [pos_tss_map[v] for v in pos_var_df.variant]
-            pos_var_df["label"] = "pos"
-
-            neg_variants = [v for v in nsnp_scores if v in neg_tss_map]
-            neg_var_df = pd.DataFrame(
-                {
-                    "variant": neg_variants,
-                    "label": "neg",
-                    "coef": np.nan,
-                    "pred": np.nan,
-                    "pred_agg": [nsnp_scores[v] for v in neg_variants],
-                    "tss_dist": [neg_tss_map[v] for v in neg_variants],
-                    "tss_dist_eqtl": np.nan,
-                }
-            )
-
-            scatter_cols = [
-                "variant",
-                "label",
-                "coef",
-                "pred",
-                "pred_agg",
-                "tss_dist",
-                "tss_dist_eqtl",
-            ]
+            scatter_cols = ["variant", "label", "coef", "pred", "measured", "tss_dist"]
             scatter_df = pd.concat(
-                [
-                    pos_var_df[scatter_cols],
-                    neg_var_df,
-                ],
+                [pos_var_df[scatter_cols], neg_var_df[scatter_cols]],
                 ignore_index=True,
             )
             scatter_df.to_csv(f"{args.out_dir}/{tissue}.tsv", index=False, sep="\t")
@@ -256,8 +202,6 @@ def main():
 
             if args.verbose:
                 print("")
-
-    pybedtools.cleanup()
 
     # form metrics table
     metrics_df = pd.DataFrame(metrics_rows)
@@ -300,29 +244,8 @@ def main():
         print("Distance top-1:     %.4f" % np.nanmean(egene_df.baseline_top1))
 
 
-def compute_eqtl_tss_dist(eqtl_df: pd.DataFrame, gene_tss: dict):
-    """Compute distance from each variant to its eQTL gene's TSS.
-
-    Args:
-        eqtl_df: DataFrame with 'variant' and 'gene' columns.
-        gene_tss: Dictionary from read_gene_tss().
-
-    Returns:
-        Series of distances, aligned with eqtl_df index.
-    """
-    dists = []
-    for _, row in eqtl_df.iterrows():
-        v_chrom, v_pos = variant_pos(row.variant)
-        gene_info = gene_tss.get(row.gene)
-        if gene_info is not None and gene_info[0] == v_chrom:
-            dists.append(abs(v_pos - gene_info[1]))
-        else:
-            dists.append(np.nan)
-    return dists
-
-
 def read_eqtl_vcf(tissue_vcf_file: str):
-    """Read eQTLs from the new gtex_eqtl VCF (INFO carries GENE, AFC)."""
+    """Read eQTLs from the new gtex_eqtl VCF (INFO carries GENE, AFC, TSSD)."""
     if not os.path.isfile(tissue_vcf_file):
         return None
     rows = []
@@ -335,9 +258,46 @@ def read_eqtl_vcf(tissue_vcf_file: str):
         info = dict(f.split("=", 1) for f in cols[7].split(";") if "=" in f)
         gene = trim_dot(info.get("GENE", ""))
         afc = float(info["AFC"])
+        tssd_raw = info.get("TSSD", ".")
+        tssd = np.nan if tssd_raw == "." else float(tssd_raw)
         if not gene:
             continue
-        rows.append({"variant": vid, "gene": gene, "coef": afc, "allele1": ref})
+        rows.append(
+            {
+                "variant": vid,
+                "gene": gene,
+                "coef": afc,
+                "allele1": ref,
+                "tss_dist": tssd,
+            }
+        )
+    return pd.DataFrame(rows) if rows else None
+
+
+def read_neg_vcf(neg_vcf_file: str):
+    """Read matched-negative variants from a gtex_eqtl {tissue}_neg.vcf.
+
+    Negatives carry an assigned gene (INFO GENE=, the nearest-cognate-feature
+    reassignment) but no AFC. Returns one row per variant with the columns
+    add_scores() needs, so each negative is scored at its assigned gene exactly
+    as a positive is scored at its eQTL gene.
+    """
+    if not os.path.isfile(neg_vcf_file):
+        return None
+    rows = []
+    for line in open(neg_vcf_file):
+        if line.startswith("#"):
+            continue
+        cols = line.rstrip("\n").split("\t")
+        vid = cols[2]
+        ref = cols[3]
+        info = dict(f.split("=", 1) for f in cols[7].split(";") if "=" in f)
+        gene = trim_dot(info.get("GENE", ""))
+        tssd_raw = info.get("TSSD", ".")
+        tssd = np.nan if tssd_raw == "." else float(tssd_raw)
+        if not gene:
+            continue
+        rows.append({"variant": vid, "gene": gene, "allele1": ref, "tss_dist": tssd})
     return pd.DataFrame(rows) if rows else None
 
 
@@ -376,6 +336,7 @@ def read_eqtl_ems(tissue: str, gtex_vcf_dir: str, pip_t: float = 0.9):
                 "gene": [trim_dot(gene_id) for gene_id in df_causal.gene],
                 "coef": df_causal.beta_posterior,
                 "allele1": df_causal.allele1,
+                "tss_dist": np.nan,
             }
         )
     return eqtl_df
@@ -523,30 +484,6 @@ def add_scores(
     eqtl_df["score"] = scores_out
     eqtl_df["measured"] = measured
     return eqtl_df
-
-
-def _aggregate_scores_across_genes(data: dict, match_tis: np.ndarray):
-    """Aggregate absolute scores across all genes for each SNP.
-
-    Args:
-        data: Data dictionary from _load_hdf5_data()
-        match_tis: Array of target indices that match the tissue
-
-    Returns:
-        snp_scores: Dictionary mapping SNP -> aggregated score
-        scored_snps: Set of SNPs with at least one gene pair
-    """
-    snp_scores = {snp: 0.0 for snp in data["snps"]}
-    scored_snps = set()
-
-    for (si, gi), row in data["pair_row"].items():
-        snp = data["snps"][si]
-        scored_snps.add(snp)
-        vals = data["stat_matrix"][row, match_tis].astype("float32")
-        score = float(np.mean(vals))
-        snp_scores[snp] += np.abs(score)
-
-    return snp_scores, scored_snps
 
 
 def _index_tss_by_chrom(gene_tss: dict):
@@ -746,23 +683,6 @@ def _topk_accuracy(scored: pd.DataFrame, score_col: str, k: int):
         if top.label.sum() > 0:
             hits += 1
     return float(hits / n) if n else float("nan")
-
-
-def read_snp_scores(gtex_scores_file, keyword, score_key="logSUM"):
-    """Return per-SNP aggregated absolute scores from gene-level HDF5.
-
-    Args:
-      gtex_scores_file (str): Path to HDF5 scores file.
-      keyword (str): Tissue keyword for matching GTEx targets.
-      score_key (str): Score key in HDF5 file.
-
-    Returns:
-      snp_scores (dict): SNP -> aggregated abs score.
-      scored_snps (set): SNPs with at least one gene pair.
-    """
-    match_tis = _match_tissue_targets(gtex_scores_file, keyword, score_key)
-    data = _load_hdf5_data(gtex_scores_file, score_key)
-    return _aggregate_scores_across_genes(data, match_tis)
 
 
 ################################################################################

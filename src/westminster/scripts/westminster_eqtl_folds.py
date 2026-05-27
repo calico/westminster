@@ -115,7 +115,7 @@ def main():
     snp_group.add_argument(
         "--gene_cov_t",
         type=float,
-        default=0.0,
+        default=0.5,
         help="Minimum gene coverage fraction to include",
     )
     snp_group.add_argument(

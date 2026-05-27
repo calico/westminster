@@ -31,7 +31,7 @@ def main():
     parser.add_argument(
         "-g",
         "--gtex_vcf_dir",
-        default="/home/drk/seqnn/data/gtex_fine/susie_pip90r",
+        default="/home/drk/seqnn/data/gtex_v11/eqtl_pip90",
         help="GTEx VCF directory",
     )
     parser.add_argument(
