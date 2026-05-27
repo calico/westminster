@@ -14,7 +14,6 @@ import seaborn as sns
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import average_precision_score, roc_auc_score, roc_curve
 from sklearn.model_selection import KFold
-import lightgbm as lgb
 import xgboost as xgb
 
 """
@@ -130,6 +129,9 @@ def main():
     )
     parser.add_option("-t", dest="targets_file", default=None)
     (options, args) = parser.parse_args()
+
+    if options.xgboost and options.lgbm:
+        parser.error("Options --xgboost and --lgbm are mutually exclusive.")
 
     if len(args) != 2:
         parser.error("Must provide positive and negative variant predictions.")
@@ -641,6 +643,8 @@ def folds_lgbm(
       random_state (:obj:`int`):
         Random state.
     """
+    lgb = _import_lightgbm()
+
     aurocs = []
     fpr_folds = []
     tpr_folds = []
@@ -720,6 +724,8 @@ def full_lgbm(
       random_state (:obj:`int`):
         Random state.
     """
+    lgb = _import_lightgbm()
+
     model = lgb.LGBMClassifier(
         n_estimators=n_estimators,
         max_depth=max_depth,
@@ -730,6 +736,17 @@ def full_lgbm(
     )
     model.fit(X, y)
     return model
+
+
+def _import_lightgbm():
+    """Import LightGBM only when needed for --lgbm workflows."""
+    try:
+        import lightgbm as lgb
+    except ImportError as exc:
+        raise ImportError(
+            "LightGBM is required for --lgbm. Install it with `pip install lightgbm`."
+        ) from exc
+    return lgb
 
 
 def plot_roc(fprs: np.array, tprs: np.array, out_dir: str):
