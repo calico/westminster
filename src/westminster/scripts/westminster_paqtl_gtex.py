@@ -198,6 +198,10 @@ def _match_tissue_targets(
     if score_key.startswith("gene/"):
         targets_name = "targets_gene.txt"
         gene_targets = True
+    elif score_key.startswith("covgene/"):
+        # covgene/ stats span the gene-track subset, indexed by targets_covgene.txt
+        targets_name = "targets_covgene.txt"
+        gene_targets = False
     else:
         targets_name = "targets_cov.txt"
         gene_targets = False
