@@ -114,6 +114,15 @@ def main():
         help="HDF5 key stat to consider. [Default: %default]",
     )
     parser.add_option(
+        "--gene_agg",
+        dest="gene_agg",
+        default="none",
+        type="choice",
+        choices=["none", "max", "sum"],
+        help="Aggregate pair-indexed (covgene/) scores across genes to one row "
+        "per SNP, weighting genes evenly. [Default: %default]",
+    )
+    parser.add_option(
         "-x",
         dest="xgboost",
         default=False,
@@ -158,14 +167,15 @@ def main():
         targets_df = pd.read_csv(options.targets_file, sep="\t", index_col=0)
         target_slice = targets_df.index
 
-    # read positive/negative variants
-    Xp = read_scores(sadp_file, options.score_keys, target_slice)
-    Xn = read_scores(sadn_file, options.score_keys, target_slice)
+    # read positive/negative variants (abs + gene aggregation applied within)
+    Xp = read_scores(
+        sadp_file, options.score_keys, target_slice, options.abs_value, options.gene_agg
+    )
+    Xn = read_scores(
+        sadn_file, options.score_keys, target_slice, options.abs_value, options.gene_agg
+    )
 
     # transformations
-    if options.abs_value:
-        Xp = np.abs(Xp)
-        Xn = np.abs(Xn)
     if options.model_pkl:
         Xp = model.transform(Xp)
         Xn = model.transform(Xn)
@@ -272,6 +282,7 @@ def main():
             "folds": options.num_folds,
             "iterations": options.iterations,
             "score_keys": options.score_keys,
+            "gene_agg": options.gene_agg,
             "abs_value": options.abs_value,
             "indel": options.indel,
             "indel_scale": options.indel_scale,
@@ -807,9 +818,23 @@ def read_indel(h5_file, indel_abs=True, indel_bool=False):
     return indels
 
 
-def read_scores(stats_h5_file: str, score_keys: List[str], target_slice: np.array):
+def read_scores(
+    stats_h5_file: str,
+    score_keys: List[str],
+    target_slice: np.array,
+    abs_value: bool = False,
+    gene_agg: str = "none",
+):
     """
     Read variant scores from HDF5 file.
+
+    For pair-indexed stats (covgene/), the file carries a `snp_idx` dataset
+    mapping each row to its base SNP, so one SNP spans several gene rows. When
+    `gene_agg` is "max" or "sum", those rows are collapsed to a single feature
+    vector per SNP (genes weighted evenly), yielding one row per SNP ordered by
+    ascending SNP index. SNP-indexed cov/ files have no `snp_idx`, so the flag
+    is a no-op for them. `abs_value` is applied before aggregation so that
+    "max" selects the strongest-magnitude gene.
 
     Args:
       stats_h5_file (:obj:`str`):
@@ -818,6 +843,10 @@ def read_scores(stats_h5_file: str, score_keys: List[str], target_slice: np.arra
         Stat HDF5 keys.
       target_slice (:obj:`np.array`):
         Target axis slice.
+      abs_value (:obj:`bool`):
+        Take absolute value of features.
+      gene_agg (:obj:`str`):
+        Per-SNP gene aggregation: "none", "max", or "sum".
     """
     scores = []
     with h5py.File(stats_h5_file, "r") as stats_h5:
@@ -828,9 +857,35 @@ def read_scores(stats_h5_file: str, score_keys: List[str], target_slice: np.arra
             score = np.nan_to_num(score).astype("float32")
             scores.append(score)
 
-    # S x V x T to V x (ST)
-    scores = np.concatenate(scores, axis=-1)
+        # S x V x T to V x (ST)
+        scores = np.concatenate(scores, axis=-1)
+
+        if abs_value:
+            scores = np.abs(scores)
+
+        # collapse pair-indexed (covgene/) rows to one per SNP
+        if gene_agg != "none" and "snp_idx" in stats_h5:
+            snp_idx = stats_h5["snp_idx"][:]
+            scores = aggregate_genes(scores, snp_idx, gene_agg)
+
     return scores
+
+
+def aggregate_genes(scores: np.array, snp_idx: np.array, gene_agg: str):
+    """Collapse pair-indexed rows to one feature vector per SNP.
+
+    Args:
+      scores (:obj:`np.array`):
+        Pair-indexed feature matrix (num_pairs, T).
+      snp_idx (:obj:`np.array`):
+        Base SNP index for each row.
+      gene_agg (:obj:`str`):
+        "max" or "sum" reduction across each SNP's gene rows.
+    """
+    reduce_fn = np.maximum.reduce if gene_agg == "max" else np.sum
+    snp_order = sorted(set(int(s) for s in snp_idx))
+    agg = [reduce_fn(scores[snp_idx == si], axis=0) for si in snp_order]
+    return np.array(agg, dtype="float32")
 
 
 ################################################################################

@@ -218,6 +218,20 @@ def main():
         help="Random forest min_samples_leaf",
     )
     gtex_group.add_argument(
+        "--classifier",
+        dest="classifier",
+        default="lgbm",
+        choices=["lgbm", "xgboost"],
+        help="Gradient-boosted tree classifier",
+    )
+    gtex_group.add_argument(
+        "--gene_agg",
+        dest="gene_agg",
+        default="max",
+        choices=["max", "sum"],
+        help="Aggregate covgene/ scores across genes (one feature per SNP)",
+    )
+    gtex_group.add_argument(
         "--metrics_only",
         default=False,
         action="store_true",
@@ -324,14 +338,14 @@ def main():
         ################################################################
         # fit classifiers
 
-        snp_stats_cov = [s for s in snp_stats if s.startswith("cov/")]
+        # classify SNP-indexed (cov/) and pair-indexed (covgene/) stats; gene/
+        # head stats are not produced by this wrapper
+        snp_stats_class = [
+            s for s in snp_stats if s.startswith("cov/") or s.startswith("covgene/")
+        ]
 
-        # SNPs (random forest)
-        # cmd_base = "westminster_classify.py -f 8 -i 20 -n 512 -s"
-        # SNPs (xgboost)
-        cmd_base = "westminster_classify.py -f 8 -i 20 -n 96 -s -x"
-        # indels
-        # cmd_base = 'westminster_classify.py -f 6 -i 64 -s'
+        clf_flag = "--lgbm" if args.classifier == "lgbm" else "-x"
+        cmd_base = f"westminster_classify.py -f 8 -i 20 -n 96 -s {clf_flag}"
         cmd_base += f" --msl {args.msl}"
 
         if args.class_targets_file is not None:
@@ -347,7 +361,7 @@ def main():
                     tissue = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0][:-4]
                     sad_pos = f"{it_out_dir}/{tissue}_pos/scores.h5"
                     sad_neg = f"{it_out_dir}/{tissue}_neg/scores.h5"
-                    for snp_stat in snp_stats_cov:
+                    for snp_stat in snp_stats_class:
                         stat_label = snp_stat.replace("/", "-")
                         class_out_dir = f"{it_out_dir}/{tissue}_class-{stat_label}"
                         if args.class_name is not None:
@@ -356,6 +370,8 @@ def main():
                             cmd_class = (
                                 f"{cmd_base} -o {class_out_dir} --stat {snp_stat}"
                             )
+                            if snp_stat.startswith("covgene/"):
+                                cmd_class += f" --gene_agg {args.gene_agg}"
                             cmd_class += f" {sad_pos} {sad_neg}"
                             if args.local:
                                 jobs.append(cmd_class)
@@ -377,13 +393,15 @@ def main():
             tissue = os.path.splitext(os.path.split(gtex_pos_vcf)[1])[0][:-4]
             sad_pos = f"{ens_out_dir}/{tissue}_pos/scores.h5"
             sad_neg = f"{ens_out_dir}/{tissue}_neg/scores.h5"
-            for snp_stat in snp_stats_cov:
+            for snp_stat in snp_stats_class:
                 stat_label = snp_stat.replace("/", "-")
                 class_out_dir = f"{ens_out_dir}/{tissue}_class-{stat_label}"
                 if args.class_name is not None:
                     class_out_dir += f"-{args.class_name}"
                 if not os.path.isfile(f"{class_out_dir}/stats.txt"):
                     cmd_class = f"{cmd_base} -o {class_out_dir} --stat {snp_stat}"
+                    if snp_stat.startswith("covgene/"):
+                        cmd_class += f" --gene_agg {args.gene_agg}"
                     cmd_class += f" {sad_pos} {sad_neg}"
                     if args.local:
                         jobs.append(cmd_class)
