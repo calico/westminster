@@ -197,6 +197,7 @@ def main():
     # combine
     X = np.concatenate([Xp, Xn], axis=0)
     y = np.array([True] * Xp.shape[0] + [False] * Xn.shape[0], dtype="bool")
+    del Xp, Xn
 
     # train classifier
     if X.shape[1] == 1:
@@ -828,13 +829,22 @@ def read_scores(
     """
     Read variant scores from HDF5 file.
 
-    For pair-indexed stats (covgene/), the file carries a `snp_idx` dataset
-    mapping each row to its base SNP, so one SNP spans several gene rows. When
-    `gene_agg` is "max" or "sum", those rows are collapsed to a single feature
-    vector per SNP (genes weighted evenly), yielding one row per SNP ordered by
-    ascending SNP index. SNP-indexed cov/ files have no `snp_idx`, so the flag
-    is a no-op for them. `abs_value` is applied before aggregation so that
-    "max" selects the strongest-magnitude gene.
+    For pair-indexed stats (covgene/, gene/), the file carries a `snp_idx`
+    dataset mapping each row to its base SNP, so one SNP spans several gene rows.
+    When `gene_agg` is "max" or "sum", those rows are collapsed to a single
+    feature vector per SNP (genes weighted evenly). SNP-indexed cov/ stats have
+    one row per SNP and no gene structure, so the flag is a no-op for them.
+
+    Combining stats from different index families (e.g. cov/ with covgene/) is
+    supported: each pair-indexed key is aggregated to per-SNP and reindexed onto
+    the full SNP set (the cov/ rows), filling SNPs with no gene rows with zeros,
+    so all keys share one row per SNP before concatenation. When every key is
+    pair-indexed, the compact per-SNP-with-genes ordering is kept instead.
+
+    `abs_value` is applied before aggregation so that "max" selects the
+    strongest-magnitude gene. Each pair-indexed key is reduced in its native
+    HDF5 dtype (f16) and only the collapsed result is upcast to float32, so the
+    full pair matrix is never materialized at float32.
 
     Args:
       stats_h5_file (:obj:`str`):
@@ -848,44 +858,75 @@ def read_scores(
       gene_agg (:obj:`str`):
         Per-SNP gene aggregation: "none", "max", or "sum".
     """
-    scores = []
     with h5py.File(stats_h5_file, "r") as stats_h5:
-        for sk in score_keys:
+        snp_idx = stats_h5["snp_idx"][:] if "snp_idx" in stats_h5 else None
+
+        # covgene/ and gene/ stats are pair-indexed (one row per SNP x gene)
+        pair_indexed = [
+            snp_idx is not None
+            and (sk.startswith("covgene/") or sk.startswith("gene/"))
+            for sk in score_keys
+        ]
+        aggregate = gene_agg != "none" and any(pair_indexed)
+        mixed = aggregate and not all(pair_indexed)
+
+        # contiguous SNP groups for collapsing pair rows, plus the full SNP
+        # count needed to align pair-indexed keys with SNP-indexed ones
+        if aggregate:
+            order, group_starts, group_snps = gene_groups(snp_idx)
+            n_snps = (
+                next(
+                    stats_h5[sk].shape[0]
+                    for sk, p in zip(score_keys, pair_indexed)
+                    if not p
+                )
+                if mixed
+                else None
+            )
+        reduceat = np.maximum.reduceat if gene_agg == "max" else np.add.reduceat
+
+        key_scores = []
+        for sk, is_pair in zip(score_keys, pair_indexed):
             score = stats_h5[sk][:]
             if target_slice is not None:
                 score = score[..., target_slice]
-            score = np.nan_to_num(score).astype("float32")
-            scores.append(score)
+            np.nan_to_num(score, copy=False)
+            if abs_value:
+                np.abs(score, out=score)
 
-        # S x V x T to V x (ST)
-        scores = np.concatenate(scores, axis=-1)
+            if aggregate and is_pair:
+                # collapse gene rows in native dtype, then upcast small result
+                if order is not None:
+                    score = score[order]
+                score = reduceat(score, group_starts, axis=0).astype("float32")
+                if mixed:
+                    full = np.zeros((n_snps, score.shape[1]), dtype="float32")
+                    full[group_snps] = score
+                    score = full
+            else:
+                score = score.astype("float32")
 
-        if abs_value:
-            scores = np.abs(scores)
+            key_scores.append(score)
 
-        # collapse pair-indexed (covgene/) rows to one per SNP
-        if gene_agg != "none" and "snp_idx" in stats_h5:
-            snp_idx = stats_h5["snp_idx"][:]
-            scores = aggregate_genes(scores, snp_idx, gene_agg)
-
-    return scores
+    return np.concatenate(key_scores, axis=-1)
 
 
-def aggregate_genes(scores: np.array, snp_idx: np.array, gene_agg: str):
-    """Collapse pair-indexed rows to one feature vector per SNP.
+def gene_groups(snp_idx: np.array):
+    """Contiguous SNP groupings for collapsing pair-indexed rows.
 
-    Args:
-      scores (:obj:`np.array`):
-        Pair-indexed feature matrix (num_pairs, T).
-      snp_idx (:obj:`np.array`):
-        Base SNP index for each row.
-      gene_agg (:obj:`str`):
-        "max" or "sum" reduction across each SNP's gene rows.
+    Returns `(order, group_starts, group_snps)`: rows taken in `order` (None
+    when `snp_idx` is already non-decreasing) fall into contiguous per-SNP
+    groups beginning at `group_starts`, with `group_snps` the SNP index of each
+    group. Groups are ordered by ascending SNP index, so the collapsed rows are
+    deterministic and consistent between the positive and negative files.
     """
-    reduce_fn = np.maximum.reduce if gene_agg == "max" else np.sum
-    snp_order = sorted(set(int(s) for s in snp_idx))
-    agg = [reduce_fn(scores[snp_idx == si], axis=0) for si in snp_order]
-    return np.array(agg, dtype="float32")
+    if np.all(np.diff(snp_idx) >= 0):
+        order, sorted_idx = None, snp_idx
+    else:
+        order = np.argsort(snp_idx, kind="stable")
+        sorted_idx = snp_idx[order]
+    group_starts = np.r_[0, np.flatnonzero(np.diff(sorted_idx)) + 1]
+    return order, group_starts, sorted_idx[group_starts]
 
 
 ################################################################################
