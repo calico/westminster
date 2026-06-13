@@ -217,6 +217,20 @@ def main():
         help="Random forest min_samples_leaf",
     )
     gtex_group.add_argument(
+        "--classifier",
+        dest="classifier",
+        default="lgbm",
+        choices=["lgbm", "xgboost"],
+        help="Gradient-boosted tree classifier",
+    )
+    gtex_group.add_argument(
+        "--gene_agg",
+        dest="gene_agg",
+        default="max",
+        choices=["max", "sum"],
+        help="Aggregate covgene/ scores across genes (one feature per SNP)",
+    )
+    gtex_group.add_argument(
         "--metrics_only",
         default=False,
         action="store_true",
@@ -318,8 +332,9 @@ def main():
 
         snp_stats_gene = [s for s in snp_stats if s.startswith("covgene/")]
 
-        # paQTL classification (xgboost)
-        cmd_base = "westminster_classify.py -f 8 -i 20 -n 96 -s -x"
+        # paQTL classification on gene-aggregated covgene/ scores
+        clf_flag = "--lgbm" if args.classifier == "lgbm" else "-x"
+        cmd_base = f"westminster_classify.py -f 8 -i 20 -n 96 -s {clf_flag}"
         cmd_base += f" --msl {args.msl}"
 
         if args.class_targets_file is not None:
@@ -347,6 +362,7 @@ def main():
                             cmd_class = (
                                 f"{cmd_base} -o {class_out_dir} --stat {snp_stat}"
                             )
+                            cmd_class += f" --gene_agg {args.gene_agg}"
                             cmd_class += f" {sad_pos} {sad_neg}"
                             if args.local:
                                 jobs.append(cmd_class)
@@ -377,6 +393,7 @@ def main():
                     class_out_dir += f"-{args.class_name}"
                 if not os.path.isfile(f"{class_out_dir}/stats.txt"):
                     cmd_class = f"{cmd_base} -o {class_out_dir} --stat {snp_stat}"
+                    cmd_class += f" --gene_agg {args.gene_agg}"
                     cmd_class += f" {sad_pos} {sad_neg}"
                     if args.local:
                         jobs.append(cmd_class)
@@ -479,6 +496,7 @@ def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
     """
     merge_dir = f"{it_out_dir}/merge_{posneg}"
     targets_cov_file = f"{merge_dir}/targets_cov.txt"
+    targets_covgene_file = f"{merge_dir}/targets_covgene.txt"
     targets_gene_file = f"{merge_dir}/targets_gene.txt"
     merge_h5_file = f"{merge_dir}/scores.h5"
 
@@ -544,6 +562,10 @@ def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
             tissue_dir = f"{it_out_dir}/{tissue_label}_{posneg}"
             os.makedirs(tissue_dir, exist_ok=True)
             shutil.copyfile(targets_cov_file, f"{tissue_dir}/targets_cov.txt")
+            if os.path.exists(targets_covgene_file):
+                shutil.copyfile(
+                    targets_covgene_file, f"{tissue_dir}/targets_covgene.txt"
+                )
             if os.path.exists(targets_gene_file):
                 shutil.copyfile(targets_gene_file, f"{tissue_dir}/targets_gene.txt")
 

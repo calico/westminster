@@ -114,6 +114,16 @@ def main():
         help="HDF5 key stat to consider. [Default: %default]",
     )
     parser.add_option(
+        "--gene_agg",
+        dest="gene_agg",
+        default="max",
+        type="choice",
+        choices=["max", "sum"],
+        help="Reduction for collapsing pair-indexed (covgene/, gene/) scores "
+        "across genes to one row per SNP; ignored for SNP-indexed cov/ stats. "
+        "[Default: %default]",
+    )
+    parser.add_option(
         "-x",
         dest="xgboost",
         default=False,
@@ -158,14 +168,15 @@ def main():
         targets_df = pd.read_csv(options.targets_file, sep="\t", index_col=0)
         target_slice = targets_df.index
 
-    # read positive/negative variants
-    Xp = read_scores(sadp_file, options.score_keys, target_slice)
-    Xn = read_scores(sadn_file, options.score_keys, target_slice)
+    # read positive/negative variants (abs + gene aggregation applied within)
+    Xp = read_scores(
+        sadp_file, options.score_keys, target_slice, options.abs_value, options.gene_agg
+    )
+    Xn = read_scores(
+        sadn_file, options.score_keys, target_slice, options.abs_value, options.gene_agg
+    )
 
     # transformations
-    if options.abs_value:
-        Xp = np.abs(Xp)
-        Xn = np.abs(Xn)
     if options.model_pkl:
         Xp = model.transform(Xp)
         Xn = model.transform(Xn)
@@ -187,6 +198,7 @@ def main():
     # combine
     X = np.concatenate([Xp, Xn], axis=0)
     y = np.array([True] * Xp.shape[0] + [False] * Xn.shape[0], dtype="bool")
+    del Xp, Xn
 
     # train classifier
     if X.shape[1] == 1:
@@ -272,6 +284,7 @@ def main():
             "folds": options.num_folds,
             "iterations": options.iterations,
             "score_keys": options.score_keys,
+            "gene_agg": options.gene_agg,
             "abs_value": options.abs_value,
             "indel": options.indel,
             "indel_scale": options.indel_scale,
@@ -807,9 +820,32 @@ def read_indel(h5_file, indel_abs=True, indel_bool=False):
     return indels
 
 
-def read_scores(stats_h5_file: str, score_keys: List[str], target_slice: np.array):
+def read_scores(
+    stats_h5_file: str,
+    score_keys: List[str],
+    target_slice: np.array,
+    abs_value: bool = False,
+    gene_agg: str = "max",
+):
     """
     Read variant scores from HDF5 file.
+
+    For pair-indexed stats (covgene/, gene/), the file carries a `snp_idx`
+    dataset mapping each row to its base SNP, so one SNP spans several gene rows.
+    Those rows are always collapsed to a single feature vector per SNP (genes
+    weighted evenly) via the `gene_agg` reduction. SNP-indexed cov/ stats have
+    one row per SNP and no gene structure, so `gene_agg` is a no-op for them.
+
+    Combining stats from different index families (e.g. cov/ with covgene/) is
+    supported: each pair-indexed key is aggregated to per-SNP and reindexed onto
+    the full SNP set (the cov/ rows), filling SNPs with no gene rows with zeros,
+    so all keys share one row per SNP before concatenation. When every key is
+    pair-indexed, the compact per-SNP-with-genes ordering is kept instead.
+
+    `abs_value` is applied before aggregation so that "max" selects the
+    strongest-magnitude gene. Each pair-indexed key is reduced in its native
+    HDF5 dtype (f16) and only the collapsed result is upcast to float32, so the
+    full pair matrix is never materialized at float32.
 
     Args:
       stats_h5_file (:obj:`str`):
@@ -818,19 +854,83 @@ def read_scores(stats_h5_file: str, score_keys: List[str], target_slice: np.arra
         Stat HDF5 keys.
       target_slice (:obj:`np.array`):
         Target axis slice.
+      abs_value (:obj:`bool`):
+        Take absolute value of features.
+      gene_agg (:obj:`str`):
+        Per-SNP gene aggregation: "max" or "sum".
     """
-    scores = []
     with h5py.File(stats_h5_file, "r") as stats_h5:
-        for sk in score_keys:
+        snp_idx = stats_h5["snp_idx"][:] if "snp_idx" in stats_h5 else None
+
+        # covgene/ and gene/ stats are pair-indexed (one row per SNP x gene)
+        pair_indexed = [
+            snp_idx is not None
+            and (sk.startswith("covgene/") or sk.startswith("gene/"))
+            for sk in score_keys
+        ]
+
+        # pair-indexed rows (one per SNP x gene) are always collapsed to one row
+        # per SNP; the reduction is a no-op for SNP-indexed cov/ stats
+        aggregate = any(pair_indexed)
+        mixed = aggregate and not all(pair_indexed)
+
+        # contiguous SNP groups for collapsing pair rows, plus the full SNP
+        # count needed to align pair-indexed keys with SNP-indexed ones
+        if aggregate:
+            order, group_starts, group_snps = gene_groups(snp_idx)
+            n_snps = (
+                next(
+                    stats_h5[sk].shape[0]
+                    for sk, p in zip(score_keys, pair_indexed)
+                    if not p
+                )
+                if mixed
+                else None
+            )
+        reduceat = np.maximum.reduceat if gene_agg == "max" else np.add.reduceat
+
+        key_scores = []
+        for sk, is_pair in zip(score_keys, pair_indexed):
             score = stats_h5[sk][:]
             if target_slice is not None:
                 score = score[..., target_slice]
-            score = np.nan_to_num(score).astype("float32")
-            scores.append(score)
+            score = np.nan_to_num(score, copy=False)
+            if abs_value:
+                np.abs(score, out=score)
 
-    # S x V x T to V x (ST)
-    scores = np.concatenate(scores, axis=-1)
-    return scores
+            if aggregate and is_pair:
+                # collapse gene rows in native dtype, then upcast small result
+                if order is not None:
+                    score = score[order]
+                score = reduceat(score, group_starts, axis=0).astype("float32")
+                if mixed:
+                    full = np.zeros((n_snps, score.shape[1]), dtype="float32")
+                    full[group_snps] = score
+                    score = full
+            else:
+                score = score.astype("float32")
+
+            key_scores.append(score)
+
+    return np.concatenate(key_scores, axis=-1)
+
+
+def gene_groups(snp_idx: np.array):
+    """Contiguous SNP groupings for collapsing pair-indexed rows.
+
+    Returns `(order, group_starts, group_snps)`: rows taken in `order` (None
+    when `snp_idx` is already non-decreasing) fall into contiguous per-SNP
+    groups beginning at `group_starts`, with `group_snps` the SNP index of each
+    group. Groups are ordered by ascending SNP index, so the collapsed rows are
+    deterministic and consistent between the positive and negative files.
+    """
+    if np.all(np.diff(snp_idx) >= 0):
+        order, sorted_idx = None, snp_idx
+    else:
+        order = np.argsort(snp_idx, kind="stable")
+        sorted_idx = snp_idx[order]
+    group_starts = np.r_[0, np.flatnonzero(np.diff(sorted_idx)) + 1]
+    return order, group_starts, sorted_idx[group_starts]
 
 
 ################################################################################

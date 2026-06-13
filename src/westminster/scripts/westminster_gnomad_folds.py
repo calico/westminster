@@ -14,6 +14,7 @@
 # limitations under the License.
 # =========================================================================
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+import itertools
 import os
 
 import slurm
@@ -26,6 +27,13 @@ westminster_gnomad_folds.py
 
 Benchmark Baskerville model replicates on Gnomad common vs rare variant classification.
 """
+
+
+def has_gene_stat(snp_stat: str) -> bool:
+    """True if a (possibly comma-joined) stat includes a pair-indexed key."""
+    return any(
+        k.startswith("covgene/") or k.startswith("gene/") for k in snp_stat.split(",")
+    )
 
 
 ################################################################################
@@ -136,6 +144,26 @@ def main():
     # classify options
     class_group = parser.add_argument_group("westminster_classify.py options")
     class_group.add_argument(
+        "--classifier",
+        dest="classifier",
+        default="lgbm",
+        choices=["lgbm", "xgboost"],
+        help="Gradient-boosted tree classifier",
+    )
+    class_group.add_argument(
+        "--gene_agg",
+        dest="gene_agg",
+        default="max",
+        choices=["max", "sum"],
+        help="Aggregate pair-indexed (covgene/, gene/) scores across genes per SNP",
+    )
+    class_group.add_argument(
+        "--metrics_only",
+        default=False,
+        action="store_true",
+        help="Skip SNP scoring; only fit classifiers on existing scores",
+    )
+    class_group.add_argument(
         "--cn",
         dest="class_name",
         default=None,
@@ -203,7 +231,7 @@ def main():
     fold_group.add_argument(
         "--gnomad",
         dest="gnomad_vcf_dir",
-        default="/group/fdna/public/genomes/hg38/gnomad",
+        default="/group/fdna/public/genomes/hg38/gnomad/vcf",
         help="Directory with GnomAD VCF files",
     )
     fold_group.add_argument(
@@ -268,30 +296,32 @@ def main():
         else:
             snp_stats.append(f"cov/{s}")
 
-    ################################################################
-    # score SNPs
+    if not args.metrics_only:
+        ################################################################
+        # score SNPs
 
-    # merge study/tissue variants
-    rare_vcf_file = f"{args.gnomad_vcf_dir}/rare{args.variants_label}.vcf"
-    common_vcf_file = f"{args.gnomad_vcf_dir}/common{args.variants_label}.vcf"
+        # merge study/tissue variants
+        rare_vcf_file = f"{args.gnomad_vcf_dir}/rare{args.variants_label}.vcf"
+        common_vcf_file = f"{args.gnomad_vcf_dir}/common{args.variants_label}.vcf"
 
-    # embed output in the models directory
-    args.embed = True
+        # embed output in the models directory
+        args.embed = True
 
-    # score rare SNPs
-    args.vcf_file = rare_vcf_file
-    args.out_dir = f"{gnomad_out_dir}/rare{args.variants_label}"
-    snp_folds(args)
+        # score rare SNPs
+        args.vcf_file = rare_vcf_file
+        args.out_dir = f"{gnomad_out_dir}/rare{args.variants_label}"
+        snp_folds(args)
 
-    # score common SNPs
-    args.vcf_file = common_vcf_file
-    args.out_dir = f"{gnomad_out_dir}/common{args.variants_label}"
-    snp_folds(args)
+        # score common SNPs
+        args.vcf_file = common_vcf_file
+        args.out_dir = f"{gnomad_out_dir}/common{args.variants_label}"
+        snp_folds(args)
 
     ################################################################
     # fit classifiers
 
-    cmd_base = "westminster_classify.py -f 10 -i 10 -x"
+    clf_flag = "--lgbm" if args.classifier == "lgbm" else "-x"
+    cmd_base = f"westminster_classify.py -f 10 -i 10 {clf_flag}"
     cmd_base += f" -l {args.learning_rate}"
     cmd_base += f" --md {args.max_depth}"
     cmd_base += f" -n {args.n_estimators}"
@@ -299,9 +329,9 @@ def main():
     if args.class_targets_file is not None:
         cmd_base += f" -t {args.class_targets_file}"
 
+    # classify each stat alone, plus every pair of stats combined
     classify_stats = list(snp_stats)
-    if len(classify_stats) > 1:
-        classify_stats.append(",".join(snp_stats))
+    classify_stats += [",".join(pair) for pair in itertools.combinations(snp_stats, 2)]
 
     jobs = []
     for ci in range(args.crosses):
@@ -325,6 +355,8 @@ def main():
 
                     cmd_class = f"{cmd_base} -o {class_out_dir}"
                     cmd_class += f" --stat {snp_stat}"
+                    if has_gene_stat(snp_stat):
+                        cmd_class += f" --gene_agg {args.gene_agg}"
                     cmd_class += f" {scores_rare_file} {scores_common_file}"
 
                     j = slurm.Job(
@@ -357,6 +389,8 @@ def main():
 
             cmd_class = f"{cmd_base} -o {class_out_dir}"
             cmd_class += f" --stat {snp_stat}"
+            if has_gene_stat(snp_stat):
+                cmd_class += f" --gene_agg {args.gene_agg}"
             cmd_class += f" {scores_rare_file} {scores_common_file}"
 
             j = slurm.Job(
@@ -367,7 +401,7 @@ def main():
                 f"{class_out_dir}.sb",
                 queue="standard",
                 cpu=16,
-                mem=6000,
+                mem=60000,
                 time="1-0:0:0",
             )
             jobs.append(j)
