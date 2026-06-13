@@ -116,11 +116,12 @@ def main():
     parser.add_option(
         "--gene_agg",
         dest="gene_agg",
-        default="none",
+        default="max",
         type="choice",
-        choices=["none", "max", "sum"],
-        help="Aggregate pair-indexed (covgene/) scores across genes to one row "
-        "per SNP, weighting genes evenly. [Default: %default]",
+        choices=["max", "sum"],
+        help="Reduction for collapsing pair-indexed (covgene/, gene/) scores "
+        "across genes to one row per SNP; ignored for SNP-indexed cov/ stats. "
+        "[Default: %default]",
     )
     parser.add_option(
         "-x",
@@ -824,16 +825,16 @@ def read_scores(
     score_keys: List[str],
     target_slice: np.array,
     abs_value: bool = False,
-    gene_agg: str = "none",
+    gene_agg: str = "max",
 ):
     """
     Read variant scores from HDF5 file.
 
     For pair-indexed stats (covgene/, gene/), the file carries a `snp_idx`
     dataset mapping each row to its base SNP, so one SNP spans several gene rows.
-    When `gene_agg` is "max" or "sum", those rows are collapsed to a single
-    feature vector per SNP (genes weighted evenly). SNP-indexed cov/ stats have
-    one row per SNP and no gene structure, so the flag is a no-op for them.
+    Those rows are always collapsed to a single feature vector per SNP (genes
+    weighted evenly) via the `gene_agg` reduction. SNP-indexed cov/ stats have
+    one row per SNP and no gene structure, so `gene_agg` is a no-op for them.
 
     Combining stats from different index families (e.g. cov/ with covgene/) is
     supported: each pair-indexed key is aggregated to per-SNP and reindexed onto
@@ -856,7 +857,7 @@ def read_scores(
       abs_value (:obj:`bool`):
         Take absolute value of features.
       gene_agg (:obj:`str`):
-        Per-SNP gene aggregation: "none", "max", or "sum".
+        Per-SNP gene aggregation: "max" or "sum".
     """
     with h5py.File(stats_h5_file, "r") as stats_h5:
         snp_idx = stats_h5["snp_idx"][:] if "snp_idx" in stats_h5 else None
@@ -867,7 +868,10 @@ def read_scores(
             and (sk.startswith("covgene/") or sk.startswith("gene/"))
             for sk in score_keys
         ]
-        aggregate = gene_agg != "none" and any(pair_indexed)
+
+        # pair-indexed rows (one per SNP x gene) are always collapsed to one row
+        # per SNP; the reduction is a no-op for SNP-indexed cov/ stats
+        aggregate = any(pair_indexed)
         mixed = aggregate and not all(pair_indexed)
 
         # contiguous SNP groups for collapsing pair rows, plus the full SNP
