@@ -17,7 +17,7 @@ from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import itertools
 import os
 
-import slurm
+import slurmrunner
 
 from baskerville_torch import utils
 from baskerville_torch.scripts.hound_snp_folds import snp_folds
@@ -359,12 +359,11 @@ def main():
                         cmd_class += f" --gene_agg {args.gene_agg}"
                     cmd_class += f" {scores_rare_file} {scores_common_file}"
 
-                    j = slurm.Job(
+                    j = slurmrunner.Job(
                         cmd_class,
                         "gnomad",
                         f"{class_out_dir}.out",
                         f"{class_out_dir}.err",
-                        f"{class_out_dir}.sb",
                         queue="standard",
                         cpu=16,
                         mem=60000,
@@ -393,12 +392,11 @@ def main():
                 cmd_class += f" --gene_agg {args.gene_agg}"
             cmd_class += f" {scores_rare_file} {scores_common_file}"
 
-            j = slurm.Job(
+            j = slurmrunner.Job(
                 cmd_class,
                 "gnomad",
                 f"{class_out_dir}.out",
                 f"{class_out_dir}.err",
-                f"{class_out_dir}.sb",
                 queue="standard",
                 cpu=16,
                 mem=60000,
@@ -406,7 +404,7 @@ def main():
             )
             jobs.append(j)
 
-    slurm.multi_run(jobs, verbose=True)
+    slurmrunner.multi_run(jobs, verbose=True)
 
 
 ################################################################################
