@@ -119,8 +119,8 @@ def main():
         default="none",
         type="choice",
         choices=["none", "max", "sum"],
-        help="Aggregate pair-indexed (covgene/) scores across genes to one row "
-        "per SNP, weighting genes evenly. [Default: %default]",
+        help="Aggregate pair-indexed (covgene/, gene/) scores across genes to one row "
+        "per SNP, weighting genes evenly. [Default: %default]", 
     )
     parser.add_option(
         "-x",
