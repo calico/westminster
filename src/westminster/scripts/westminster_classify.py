@@ -894,7 +894,7 @@ def read_scores(
             score = stats_h5[sk][:]
             if target_slice is not None:
                 score = score[..., target_slice]
-            np.nan_to_num(score, copy=False)
+            score = np.nan_to_num(score, copy=False)
             if abs_value:
                 np.abs(score, out=score)
 
