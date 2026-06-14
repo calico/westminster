@@ -14,6 +14,7 @@
 # limitations under the License.
 # =========================================================================
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+import copy
 import glob
 import os
 import shutil
@@ -23,8 +24,10 @@ import numpy as np
 
 import slurmrunner
 
+from gcprunner.argparse_helpers import add_argparse_group
 from baskerville_torch import utils
 from baskerville_torch.scripts.hound_snp_folds import snp_folds
+from westminster.multi import relocate_gcp_scores
 
 """
 westminster_paqtl_folds.py
@@ -253,6 +256,7 @@ def main():
     # Positional arguments
     parser.add_argument("params_file", help="Parameters file")
     parser.add_argument("models_dir", help="Cross-fold models directory")
+    add_argparse_group(parser)
     args = parser.parse_args()
 
     #######################################################
@@ -289,22 +293,32 @@ def main():
         ################################################################
         # score SNPs
 
-        # merge study/tissue variants
-        mpos_vcf_file = f"{args.gtex_vcf_dir}/pos_merge.vcf"
-        mneg_vcf_file = f"{args.gtex_vcf_dir}/neg_merge.vcf"
+        # Combined pos+neg variants, pre-merged in the data dir. Scoring all
+        # variants in one snp_folds call lets every scoring job queue in a
+        # single multi_run (vs. one blocking wave per pos/neg file); they are
+        # split back per tissue/posneg below by snp_id.
+        merge_vcf_file = f"{args.gtex_vcf_dir}/merge.vcf"
+        if not os.path.exists(merge_vcf_file):
+            raise FileNotFoundError(merge_vcf_file)
 
-        # embed output in the models directory
-        args.embed = True
+        # On Slurm we embed scores in the models dir; on GCP snp_folds rejects
+        # --embed (read-only model mount) and fetches to a flat local mirror,
+        # which we then relocate into the same embed layout. snp_folds also
+        # rewrites local paths on args (models_dir, etc.), so it gets a fresh
+        # copy to keep the originals intact for the steps below.
+        gcp_backend = getattr(args, "backend", None) == "gcp"
+        local_models_dir = args.models_dir
+        fold_crosses = [
+            f"f{fi}c{ci}" for ci in range(args.crosses) for fi in fold_index
+        ]
 
-        # score negative SNPs
-        args.vcf_file = mneg_vcf_file
-        args.out_dir = f"{gtex_out_dir}/merge_neg"
-        snp_folds(args)
-
-        # score positive SNPs
-        args.vcf_file = mpos_vcf_file
-        args.out_dir = f"{gtex_out_dir}/merge_pos"
-        snp_folds(args)
+        call_args = copy.copy(args)
+        call_args.vcf_file = merge_vcf_file
+        call_args.out_dir = f"{gtex_out_dir}/merge"
+        call_args.embed = not gcp_backend
+        snp_folds(call_args)
+        if gcp_backend:
+            relocate_gcp_scores(call_args.out_dir, local_models_dir, fold_crosses)
 
         ################################################################
         # split study/tissue variants
@@ -494,7 +508,7 @@ def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
         vcf_dir (str): Directory with tissue VCFs (*_{posneg}.vcf).
         snp_stats (list[str]): List of statistics stored in merged file.
     """
-    merge_dir = f"{it_out_dir}/merge_{posneg}"
+    merge_dir = f"{it_out_dir}/merge"
     targets_cov_file = f"{merge_dir}/targets_cov.txt"
     targets_covgene_file = f"{merge_dir}/targets_covgene.txt"
     targets_gene_file = f"{merge_dir}/targets_gene.txt"

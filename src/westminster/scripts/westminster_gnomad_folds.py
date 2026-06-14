@@ -14,13 +14,16 @@
 # limitations under the License.
 # =========================================================================
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+import copy
 import itertools
 import os
 
 import slurmrunner
 
+from gcprunner.argparse_helpers import add_argparse_group
 from baskerville_torch import utils
 from baskerville_torch.scripts.hound_snp_folds import snp_folds
+from westminster.multi import relocate_gcp_scores
 
 """
 westminster_gnomad_folds.py
@@ -271,6 +274,7 @@ def main():
     # Positional arguments
     parser.add_argument("params_file", help="Parameters file")
     parser.add_argument("models_dir", help="Cross-fold models directory")
+    add_argparse_group(parser)
     args = parser.parse_args()
 
     #######################################################
@@ -304,18 +308,27 @@ def main():
         rare_vcf_file = f"{args.gnomad_vcf_dir}/rare{args.variants_label}.vcf"
         common_vcf_file = f"{args.gnomad_vcf_dir}/common{args.variants_label}.vcf"
 
-        # embed output in the models directory
-        args.embed = True
+        # On Slurm we embed scores in the models dir; on GCP snp_folds rejects
+        # --embed (read-only model mount) and fetches to a flat local mirror,
+        # which we then relocate into the same embed layout below. snp_folds
+        # also rewrites local paths on args (models_dir, etc.), so each scoring
+        # call gets a fresh copy to keep the originals intact across both calls.
+        gcp_backend = getattr(args, "backend", None) == "gcp"
+        local_models_dir = args.models_dir
+        fold_crosses = [
+            f"f{fi}c{ci}" for ci in range(args.crosses) for fi in range(args.num_folds)
+        ]
 
-        # score rare SNPs
-        args.vcf_file = rare_vcf_file
-        args.out_dir = f"{gnomad_out_dir}/rare{args.variants_label}"
-        snp_folds(args)
-
-        # score common SNPs
-        args.vcf_file = common_vcf_file
-        args.out_dir = f"{gnomad_out_dir}/common{args.variants_label}"
-        snp_folds(args)
+        for kind in (f"rare{args.variants_label}", f"common{args.variants_label}"):
+            call_args = copy.copy(args)
+            call_args.vcf_file = (
+                rare_vcf_file if kind.startswith("rare") else common_vcf_file
+            )
+            call_args.out_dir = f"{gnomad_out_dir}/{kind}"
+            call_args.embed = not gcp_backend
+            snp_folds(call_args)
+            if gcp_backend:
+                relocate_gcp_scores(call_args.out_dir, local_models_dir, fold_crosses)
 
     ################################################################
     # fit classifiers

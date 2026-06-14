@@ -17,7 +17,34 @@ import pdb
 
 import h5py
 import os
+import shutil
 import numpy as np
+
+
+def relocate_gcp_scores(out_dir: str, models_dir: str, fold_crosses: list):
+    """Move GCP-fetched per-fold/ensemble scores into the embed layout.
+
+    ``snp_folds(--backend gcp)`` rejects ``--embed`` (the staged models dir is a
+    read-only container mount) and fetches merged results to a flat local mirror
+    at ``{out_dir}/{sub}/...``. The downstream split/classify/metrics steps,
+    however, read the embed layout ``{models_dir}/{sub}/{out_dir}/...`` (= what
+    ``--embed`` would have produced under Slurm). This moves the fetched files
+    into place so the rest of the pipeline runs unchanged.
+
+    Args:
+        out_dir (str): Local mirror dir snp_folds fetched into (the per-call
+            ``args.out_dir``, e.g. ``snp_out/merge_pos``).
+        models_dir (str): Cross-fold models directory (original local path).
+        fold_crosses (list[str]): Fold identifiers, e.g. ``["f0c0", "f1c0"]``.
+    """
+    for sub in list(fold_crosses) + ["ensemble"]:
+        src = os.path.join(out_dir, sub)
+        if not os.path.isdir(src):
+            raise FileNotFoundError(f"expected GCP-fetched scores at {src}")
+        dst = os.path.join(models_dir, sub, out_dir)
+        os.makedirs(dst, exist_ok=True)
+        for name in os.listdir(src):
+            shutil.move(os.path.join(src, name), os.path.join(dst, name))
 
 
 def collect_scores(out_dir: str, num_jobs: int, h5f_name: str = "scores.h5"):
