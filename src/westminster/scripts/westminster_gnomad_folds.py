@@ -238,9 +238,6 @@ def main():
         help="Directory with GnomAD VCF files",
     )
     fold_group.add_argument(
-        "--local", dest="local", default=False, action="store_true", help="Run locally"
-    )
-    fold_group.add_argument(
         "--name", dest="name", default="gnomad", help="SLURM name prefix"
     )
     fold_group.add_argument(

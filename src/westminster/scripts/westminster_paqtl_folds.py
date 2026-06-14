@@ -172,9 +172,6 @@ def main():
         help="Subset of folds to evaluate (encoded as comma-separated string)",
     )
     fold_group.add_argument(
-        "--local", dest="local", default=False, action="store_true", help="Run locally"
-    )
-    fold_group.add_argument(
         "--name", dest="name", default="paqtl", help="SLURM name prefix"
     )
     fold_group.add_argument(
@@ -378,7 +375,7 @@ def main():
                             )
                             cmd_class += f" --gene_agg {args.gene_agg}"
                             cmd_class += f" {sad_pos} {sad_neg}"
-                            if args.local:
+                            if args.backend == "local":
                                 jobs.append(cmd_class)
                             else:
                                 j = slurmrunner.Job(
@@ -409,7 +406,7 @@ def main():
                     cmd_class = f"{cmd_base} -o {class_out_dir} --stat {snp_stat}"
                     cmd_class += f" --gene_agg {args.gene_agg}"
                     cmd_class += f" {sad_pos} {sad_neg}"
-                    if args.local:
+                    if args.backend == "local":
                         jobs.append(cmd_class)
                     else:
                         j = slurmrunner.Job(
@@ -425,7 +422,7 @@ def main():
                         )
                         jobs.append(j)
 
-        if args.local:
+        if args.backend == "local":
             utils.exec_par(jobs, 3, verbose=True)
         else:
             slurmrunner.multi_run(jobs, verbose=True)
@@ -447,7 +444,7 @@ def main():
                 cmd_metrics += f" -s {snp_stat}"
                 cmd_metrics += f" {it_out_dir}"
 
-                if args.local:
+                if args.backend == "local":
                     jobs.append(cmd_metrics)
                 else:
                     j = slurmrunner.Job(
@@ -473,7 +470,7 @@ def main():
         cmd_metrics += f" -s {snp_stat}"
         cmd_metrics += f" {ens_out_dir}"
 
-        if args.local:
+        if args.backend == "local":
             jobs.append(cmd_metrics)
         else:
             j = slurmrunner.Job(
@@ -489,7 +486,7 @@ def main():
             )
             jobs.append(j)
 
-    if args.local:
+    if args.backend == "local":
         utils.exec_par(jobs, 3, verbose=True)
     else:
         slurmrunner.multi_run(jobs, verbose=True)
