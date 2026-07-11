@@ -17,7 +17,7 @@ from westminster.gtex import (
 )
 
 """
-westminster_paqtl_gtex.py
+westminster_paqtl_gtex
 
 Evaluate variant effect prediction accuracy on GTEx paQTL classification task,
 matching model targets to GTEx tissues for per-tissue AUROC/AUPRC.

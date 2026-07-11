@@ -30,7 +30,7 @@ from baskerville_torch.scripts.hound_snp_folds import snp_folds
 from westminster.multi import relocate_gcp_scores
 
 """
-westminster_sqtl_folds.py
+westminster_sqtl_folds
 
 Benchmark Baskerville model replicates on GTEx sQTL classification task.
 """
@@ -240,7 +240,7 @@ def main():
         "--skip_boost",
         default=False,
         action="store_true",
-        help="Skip westminster_classify.py classifier stage",
+        help="Skip westminster_classify classifier stage",
     )
     # GTEx sQTL directory
     gtex_group.add_argument(
@@ -345,7 +345,7 @@ def main():
 
         # sQTL classification on gene-aggregated covgene/ scores
         clf_flag = "--lgbm" if args.classifier == "lgbm" else "-x"
-        cmd_base = f"westminster_classify.py -f 8 -i 20 -n 96 -s {clf_flag}"
+        cmd_base = f"westminster_classify -f 8 -i 20 -n 96 -s {clf_flag}"
         cmd_base += f" --msl {args.msl}"
 
         if args.class_targets_file is not None:
@@ -439,7 +439,7 @@ def main():
                 stat_label = snp_stat.replace("/", "-")
                 metrics_out_dir = f"{it_out_dir}/metrics-{stat_label}"
 
-                cmd_metrics = f"westminster_sqtl_gtex.py -g {args.gtex_vcf_dir}"
+                cmd_metrics = f"westminster_sqtl_gtex -g {args.gtex_vcf_dir}"
                 cmd_metrics += f" -o {metrics_out_dir}"
                 cmd_metrics += f" -s {snp_stat}"
                 cmd_metrics += f" {it_out_dir}"
@@ -465,7 +465,7 @@ def main():
         stat_label = snp_stat.replace("/", "-")
         metrics_out_dir = f"{ens_out_dir}/metrics-{stat_label}"
 
-        cmd_metrics = f"westminster_sqtl_gtex.py -g {args.gtex_vcf_dir}"
+        cmd_metrics = f"westminster_sqtl_gtex -g {args.gtex_vcf_dir}"
         cmd_metrics += f" -o {metrics_out_dir}"
         cmd_metrics += f" -s {snp_stat}"
         cmd_metrics += f" {ens_out_dir}"

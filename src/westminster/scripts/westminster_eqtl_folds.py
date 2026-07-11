@@ -30,7 +30,7 @@ from baskerville_torch.scripts.hound_snp_folds import snp_folds
 from westminster.multi import relocate_gcp_scores
 
 """
-westminster_eqtl_folds.py
+westminster_eqtl_folds
 
 Benchmark Baskerville model replicates on GTEx eQTL classification task.
 """
@@ -240,7 +240,7 @@ def main():
         "--skip_boost",
         default=False,
         action="store_true",
-        help="Skip westminster_classify.py classifier stage",
+        help="Skip westminster_classify classifier stage",
     )
     gtex_group.add_argument(
         "--ems",
@@ -355,7 +355,7 @@ def main():
         ]
 
         clf_flag = "--lgbm" if args.classifier == "lgbm" else "-x"
-        cmd_base = f"westminster_classify.py -f 8 -i 20 -n 96 -s {clf_flag}"
+        cmd_base = f"westminster_classify -f 8 -i 20 -n 96 -s {clf_flag}"
         cmd_base += f" --msl {args.msl}"
 
         if args.class_targets_file is not None:
@@ -447,10 +447,10 @@ def main():
 
                 if not os.path.isfile(f"{metrics_out_dir}/metrics.tsv"):
                     if snp_stat.startswith("cov/"):
-                        cmd_metrics = f"westminster_eqtl_gtex.py -g {args.gtex_vcf_dir}"
+                        cmd_metrics = f"westminster_eqtl_gtex -g {args.gtex_vcf_dir}"
                     else:
                         cmd_metrics = (
-                            f"westminster_eqtl_gtexg.py -g {args.gtex_vcf_dir}"
+                            f"westminster_eqtl_gtexg -g {args.gtex_vcf_dir}"
                         )
                     if args.ems:
                         cmd_metrics += " --ems"
@@ -480,9 +480,9 @@ def main():
 
         if not os.path.isfile(f"{metrics_out_dir}/metrics.tsv"):
             if snp_stat.startswith("cov/"):
-                cmd_metrics = f"westminster_eqtl_gtex.py -g {args.gtex_vcf_dir}"
+                cmd_metrics = f"westminster_eqtl_gtex -g {args.gtex_vcf_dir}"
             else:
-                cmd_metrics = f"westminster_eqtl_gtexg.py -g {args.gtex_vcf_dir}"
+                cmd_metrics = f"westminster_eqtl_gtexg -g {args.gtex_vcf_dir}"
             if args.ems:
                 cmd_metrics += " --ems"
             cmd_metrics += f" -o {metrics_out_dir}"

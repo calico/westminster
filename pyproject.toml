@@ -14,21 +14,43 @@ dynamic = ["version"]
 
 requires-python = ">=3.9"
 dependencies = [
-    "h5py~=3.10.0",
-    "numpy~=1.24.3",
-    "pandas~=1.5.3",
+    "h5py>=3.12,<4",
+    "numpy>=2.3,<3",
+    "pandas>=3.0,<4",
     "pybedtools~=0.12",
+    "tabulate~=0.9",
+    "xgboost>=2.1,<4",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "black~=23.12.1",
-    "pytest~=7.4.4",
-    "ruff~=0.1.11",
+    "black~=26.0",
+    "pytest~=9.0",
+    "ruff~=0.15",
     "slurmrunner",
 ]
+lgbm = [
+    "lightgbm>=4.0,<5",
+]
+
+[project.scripts]
+westminster_classify = "westminster.scripts.westminster_classify:main"
+westminster_eqtl_folds = "westminster.scripts.westminster_eqtl_folds:main"
+westminster_eqtl_gtex = "westminster.scripts.westminster_eqtl_gtex:main"
+westminster_eqtl_gtexg = "westminster.scripts.westminster_eqtl_gtexg:main"
+westminster_evalg_folds = "westminster.scripts.westminster_evalg_folds:main"
+westminster_gnomad_folds = "westminster.scripts.westminster_gnomad_folds:main"
+westminster_gtex_cmp = "westminster.scripts.westminster_gtex_cmp:main"
+westminster_paqtl_folds = "westminster.scripts.westminster_paqtl_folds:main"
+westminster_paqtl_gtex = "westminster.scripts.westminster_paqtl_gtex:main"
+westminster_sqtl_folds = "westminster.scripts.westminster_sqtl_folds:main"
+westminster_sqtl_gtex = "westminster.scripts.westminster_sqtl_gtex:main"
 
 [project.urls]
 Homepage = "https://github.com/calico/westminster"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["westminster*"]
 
 [tool.setuptools_scm]

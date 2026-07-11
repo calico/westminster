@@ -26,7 +26,7 @@ from baskerville_torch.scripts.hound_snp_folds import snp_folds
 from westminster.multi import relocate_gcp_scores
 
 """
-westminster_gnomad_folds.py
+westminster_gnomad_folds
 
 Benchmark Baskerville model replicates on Gnomad common vs rare variant classification.
 """
@@ -145,7 +145,7 @@ def main():
     )
 
     # classify options
-    class_group = parser.add_argument_group("westminster_classify.py options")
+    class_group = parser.add_argument_group("westminster_classify options")
     class_group.add_argument(
         "--classifier",
         dest="classifier",
@@ -331,7 +331,7 @@ def main():
     # fit classifiers
 
     clf_flag = "--lgbm" if args.classifier == "lgbm" else "-x"
-    cmd_base = f"westminster_classify.py -f 10 -i 10 {clf_flag}"
+    cmd_base = f"westminster_classify -f 10 -i 10 {clf_flag}"
     cmd_base += f" -l {args.learning_rate}"
     cmd_base += f" --md {args.max_depth}"
     cmd_base += f" -n {args.n_estimators}"

@@ -16,7 +16,7 @@ from tabulate import tabulate
 from westminster.stats import ttest_alt
 
 """
-westminster_gtex_cmp.py
+westminster_gtex_cmp
 
 Compare multiple variant score sets on the GTEx fine mapped eQTL benchmark.
 """
