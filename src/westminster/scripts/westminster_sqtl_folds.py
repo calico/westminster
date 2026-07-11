@@ -184,7 +184,7 @@ def main():
     fold_group.add_argument(
         "-j",
         dest="job_size",
-        default=512,
+        default=1024,
         type=int,
         help="Number of SNPs to process per job",
     )
@@ -246,7 +246,7 @@ def main():
     gtex_group.add_argument(
         "--gtex",
         dest="gtex_vcf_dir",
-        default="/home/drk/seqnn/data/qtl_cat/sqtl_pip90",
+        default="/home/drk/seqnn/data/gtex_v11/sqtl_pip90",
         help="Directory with GTEx sQTL VCF files",
     )
 
