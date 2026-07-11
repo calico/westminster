@@ -13,8 +13,6 @@
 # limitations under the License.
 # =========================================================================
 
-import pdb
-
 import h5py
 import os
 import shutil
@@ -41,7 +39,7 @@ def relocate_gcp_scores(out_dir: str, models_dir: str, fold_crosses: list):
         src = os.path.join(out_dir, sub)
         if not os.path.isdir(src):
             raise FileNotFoundError(f"expected GCP-fetched scores at {src}")
-        dst = os.path.join(models_dir, sub, out_dir)
+        dst = os.path.join(models_dir, sub, out_dir.lstrip(os.sep))
         os.makedirs(dst, exist_ok=True)
         for name in os.listdir(src):
             shutil.move(os.path.join(src, name), os.path.join(dst, name))

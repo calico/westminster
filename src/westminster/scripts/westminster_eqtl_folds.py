@@ -518,7 +518,7 @@ def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
     gene/) stats coexist.
 
     Args:
-        it_out_dir (str): Output iteration directory containing merge_{posneg}.
+        it_out_dir (str): Output iteration directory containing merge/.
         posneg (str): 'pos' or 'neg'.
         vcf_dir (str): Directory with tissue VCFs (*_{posneg}.vcf).
         snp_stats (list[str]): List of statistics stored in merged file.
