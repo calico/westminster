@@ -17,7 +17,7 @@ from westminster.gtex import (
 )
 
 """
-westminster_eqtl_gtex.py
+westminster_eqtl_gtex
 
 Score variant-effect predictions against GTEx eQTLs across multiple metrics.
 """

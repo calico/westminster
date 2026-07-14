@@ -17,7 +17,7 @@ from sklearn.model_selection import KFold
 import xgboost as xgb
 
 """
-westminster_classify.py
+westminster_classify
 
 Helper script to compute classifier accuracy.
 """

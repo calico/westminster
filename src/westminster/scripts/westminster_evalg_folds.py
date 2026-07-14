@@ -20,7 +20,7 @@ import os
 import slurm
 
 """
-westminster_evalg_folds.py
+westminster_evalg_folds
 
 Measure accuracy at gene-level for multiple model replicates.
 """
