@@ -1,34 +1,9 @@
+import glob
+import os
+import sys
+
 import numpy as np
 import pybedtools
-
-tissue_keywords = {
-    "Adipose_Subcutaneous": "adipose",
-    "Adipose_Visceral_Omentum": "adipose",
-    "Adrenal_Gland": "adrenal_gland",
-    "Artery_Aorta": "heart",
-    "Artery_Tibial": "heart",
-    "Brain_Cerebellum": "brain",
-    "Brain_Cortex": "brain",
-    "Breast_Mammary_Tissue": "breast",
-    "Colon_Sigmoid": "colon",
-    "Colon_Transverse": "colon",
-    "Esophagus_Mucosa": "esophagus",
-    "Esophagus_Muscularis": "esophagus",
-    "Liver": "liver",
-    "Lung": "lung",
-    "Muscle_Skeletal": "muscle",
-    "Nerve_Tibial": "nerve",
-    "Ovary": "ovary",
-    "Pancreas": "pancreas",
-    "Pituitary": "pituitary",
-    "Prostate": "prostate",
-    "Skin_Not_Sun_Exposed_Suprapubic": "skin",
-    "Spleen": "spleen",
-    "Stomach": "stomach",
-    "Testis": "testis",
-    "Thyroid": "thyroid",
-    "Whole_Blood": "blood",
-}
 
 txrev_keywords = {
     "GTEx_txrev_LCL": "lcl",
@@ -83,7 +58,7 @@ txrev_keywords = {
 }
 
 
-gtexv11_keywords = {
+gtex_keywords = {
     "Adipose_Subcutaneous": "adipose",
     "Adipose_Visceral_Omentum": "adipose",
     "Adrenal_Gland": "adrenal_gland",
@@ -150,6 +125,28 @@ def match_tissue_targets(targets_df, keyword, gene_targets=False, verbose=False)
                     print(ti, tid, tlab)
                 match_tis.append(ti)
     return np.array(match_tis)
+
+
+def discover_tissues(dir_glob, suffix, keyword_lookup):
+    """Discover tissues from files/dirs on disk and map them to keywords.
+
+    Args:
+        dir_glob: glob pattern matching one file/dir per tissue.
+        suffix: suffix to strip from each match's basename to get the tissue label.
+        keyword_lookup: dict mapping tissue label to matching keyword.
+
+    Yields:
+        (tissue_label, keyword) pairs for labels found in keyword_lookup.
+    """
+    for path in sorted(glob.glob(dir_glob)):
+        tissue_label = os.path.basename(path)[: -len(suffix)]
+        if tissue_label == "merge":
+            continue
+        keyword = keyword_lookup.get(tissue_label)
+        if keyword is None:
+            print(f"Skipping {tissue_label}: no keyword mapping.", file=sys.stderr)
+            continue
+        yield tissue_label, keyword
 
 
 def trim_dot(gene_id):

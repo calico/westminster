@@ -3,16 +3,16 @@ import argparse
 import os
 import sys
 
-import glob
 import h5py
 import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, roc_auc_score
 
 from westminster.gtex import (
+    discover_tissues,
     match_tissue_targets,
     txrev_keywords,
-    gtexv11_keywords,
+    gtex_keywords,
     trim_dot,
 )
 
@@ -65,23 +65,16 @@ def main():
     keyword_lookup = {
         t.replace("GTEx_txrev_", ""): kw for t, kw in txrev_keywords.items()
     }
-    keyword_lookup.update(gtexv11_keywords)
+    keyword_lookup.update(gtex_keywords)
 
     metrics_rows = []
 
-    for pos_dir in sorted(glob.glob(f"{args.sqtl_dir}/*_pos")):
-        tissue_label = os.path.basename(pos_dir).removesuffix("_pos")
-        if tissue_label == "merge":
-            continue  # merge_pos/ staging dir, not a tissue
-        if tissue_label not in keyword_lookup:
-            print(f"Skipping {tissue_label}: no keyword mapping.", file=sys.stderr)
-            continue
-        keyword = keyword_lookup[tissue_label]
-
+    tissues = discover_tissues(f"{args.sqtl_dir}/*_pos", "_pos", keyword_lookup)
+    for tissue_label, keyword in tissues:
         if args.verbose:
             print(tissue_label)
 
-        pos_scores_file = f"{pos_dir}/scores.h5"
+        pos_scores_file = f"{args.sqtl_dir}/{tissue_label}_pos/scores.h5"
         neg_scores_file = pos_scores_file.replace("_pos/", "_neg/")
         if not os.path.isfile(pos_scores_file) or not os.path.isfile(neg_scores_file):
             continue

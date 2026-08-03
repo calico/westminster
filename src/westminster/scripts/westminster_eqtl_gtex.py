@@ -12,8 +12,9 @@ from scipy.stats import spearmanr
 from sklearn.metrics import average_precision_score, roc_auc_score
 
 from westminster.gtex import (
+    discover_tissues,
+    gtex_keywords,
     match_tissue_targets,
-    tissue_keywords,
 )
 
 """
@@ -66,7 +67,10 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
 
     metrics_rows = []
-    for tissue, keyword in tissue_keywords.items():
+    tissues = discover_tissues(
+        f"{args.gtex_vcf_dir}/*_pos.vcf", "_pos.vcf", gtex_keywords
+    )
+    for tissue, keyword in tissues:
         if args.verbose:
             print(tissue)
 
