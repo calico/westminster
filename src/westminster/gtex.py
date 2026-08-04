@@ -2,7 +2,9 @@ import glob
 import os
 import sys
 
+import h5py
 import numpy as np
+import pandas as pd
 import pybedtools
 
 txrev_keywords = {
@@ -125,6 +127,44 @@ def match_tissue_targets(targets_df, keyword, gene_targets=False, verbose=False)
                     print(ti, tid, tlab)
                 match_tis.append(ti)
     return np.array(match_tis)
+
+
+def covgene_targets_name(gtex_scores_file: str, score_key: str):
+    """Return the targets filename indexing a covgene/ stat's track axis.
+
+    Current scoring writes covgene/ datasets over the gene-track subset of the
+    strand-collapsed targets, indexed by targets_covgene.txt (baskerville
+    snps.py, `targets_out_df[gene_mask_strand]`). Runs predating that wrote
+    covgene/ at full strand-collapsed width, indexed by targets_cov.txt, and
+    have no targets_covgene.txt at all -- and `--metrics_only` reruns never
+    re-split, so the file cannot appear retroactively. Pick whichever table
+    matches the stored width so both layouts read correctly.
+
+    TODO(deprecate): once no covgene/ scores predating the targets_covgene.txt
+    split (westminster 5f643a7, 2026-05-31) are still in use, drop this probe
+    and go back to naming targets_covgene.txt unconditionally.
+
+    Args:
+        gtex_scores_file (str): Path to a tissue scores.h5.
+        score_key (str): Score key, e.g. covgene/logFC.
+
+    Returns:
+        str: Targets filename to read alongside scores.h5.
+    """
+    with h5py.File(gtex_scores_file, "r") as h5_file:
+        covgene_depth = h5_file[score_key].shape[-1]
+
+    for targets_name in ("targets_covgene.txt", "targets_cov.txt"):
+        targets_file = gtex_scores_file.replace("scores.h5", targets_name)
+        if os.path.isfile(targets_file):
+            targets_df = pd.read_csv(targets_file, sep="\t", index_col=0)
+            if len(targets_df) == covgene_depth:
+                return targets_name
+
+    raise ValueError(
+        f"No targets table matches {score_key} width {covgene_depth} in "
+        f"{os.path.dirname(gtex_scores_file)}"
+    )
 
 
 def discover_tissues(dir_glob, suffix, keyword_lookup):
