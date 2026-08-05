@@ -153,16 +153,21 @@ def covgene_targets_name(gtex_scores_file: str, score_key: str):
     with h5py.File(gtex_scores_file, "r") as h5_file:
         covgene_depth = h5_file[score_key].shape[-1]
 
+    scores_dir = os.path.dirname(gtex_scores_file)
     for targets_name in ("targets_covgene.txt", "targets_cov.txt"):
-        targets_file = gtex_scores_file.replace("scores.h5", targets_name)
+        targets_file = os.path.join(scores_dir, targets_name)
         if os.path.isfile(targets_file):
-            targets_df = pd.read_csv(targets_file, sep="\t", index_col=0)
-            if len(targets_df) == covgene_depth:
+            # count rows without a full parse; the caller re-reads the winner
+            with open(targets_file) as targets_open:
+                num_targets = sum(1 for _ in targets_open) - 1  # minus header
+            if num_targets == covgene_depth:
                 return targets_name
 
-    raise ValueError(
+    # not ValueError: callers catch that from add_scores to skip a tissue with
+    # unmatched targets, which would silently swallow a genuine layout error
+    raise RuntimeError(
         f"No targets table matches {score_key} width {covgene_depth} in "
-        f"{os.path.dirname(gtex_scores_file)}"
+        f"{scores_dir}"
     )
 
 
@@ -178,7 +183,7 @@ def discover_tissues(dir_glob, suffix, keyword_lookup):
         (tissue_label, keyword) pairs for labels found in keyword_lookup.
     """
     for path in sorted(glob.glob(dir_glob)):
-        tissue_label = os.path.basename(path)[: -len(suffix)]
+        tissue_label = os.path.basename(path).removesuffix(suffix)
         if tissue_label == "merge":
             continue
         keyword = keyword_lookup.get(tissue_label)
