@@ -1,34 +1,10 @@
+import glob
+import os
+import sys
+
+import h5py
 import numpy as np
 import pybedtools
-
-tissue_keywords = {
-    "Adipose_Subcutaneous": "adipose",
-    "Adipose_Visceral_Omentum": "adipose",
-    "Adrenal_Gland": "adrenal_gland",
-    "Artery_Aorta": "heart",
-    "Artery_Tibial": "heart",
-    "Brain_Cerebellum": "brain",
-    "Brain_Cortex": "brain",
-    "Breast_Mammary_Tissue": "breast",
-    "Colon_Sigmoid": "colon",
-    "Colon_Transverse": "colon",
-    "Esophagus_Mucosa": "esophagus",
-    "Esophagus_Muscularis": "esophagus",
-    "Liver": "liver",
-    "Lung": "lung",
-    "Muscle_Skeletal": "muscle",
-    "Nerve_Tibial": "nerve",
-    "Ovary": "ovary",
-    "Pancreas": "pancreas",
-    "Pituitary": "pituitary",
-    "Prostate": "prostate",
-    "Skin_Not_Sun_Exposed_Suprapubic": "skin",
-    "Spleen": "spleen",
-    "Stomach": "stomach",
-    "Testis": "testis",
-    "Thyroid": "thyroid",
-    "Whole_Blood": "blood",
-}
 
 txrev_keywords = {
     "GTEx_txrev_LCL": "lcl",
@@ -83,7 +59,7 @@ txrev_keywords = {
 }
 
 
-gtexv11_keywords = {
+gtex_keywords = {
     "Adipose_Subcutaneous": "adipose",
     "Adipose_Visceral_Omentum": "adipose",
     "Adrenal_Gland": "adrenal_gland",
@@ -150,6 +126,71 @@ def match_tissue_targets(targets_df, keyword, gene_targets=False, verbose=False)
                     print(ti, tid, tlab)
                 match_tis.append(ti)
     return np.array(match_tis)
+
+
+def covgene_targets_name(gtex_scores_file: str, score_key: str):
+    """Return the targets filename indexing a covgene/ stat's track axis.
+
+    Current scoring writes covgene/ datasets over the gene-track subset of the
+    strand-collapsed targets, indexed by targets_covgene.txt (baskerville
+    snps.py, `targets_out_df[gene_mask_strand]`). Runs predating that wrote
+    covgene/ at full strand-collapsed width, indexed by targets_cov.txt, and
+    have no targets_covgene.txt at all -- and `--metrics_only` reruns never
+    re-split, so the file cannot appear retroactively. Pick whichever table
+    matches the stored width so both layouts read correctly.
+
+    TODO(deprecate): once no covgene/ scores predating the targets_covgene.txt
+    split (westminster 5f643a7, 2026-05-31) are still in use, drop this probe
+    and go back to naming targets_covgene.txt unconditionally.
+
+    Args:
+        gtex_scores_file (str): Path to a tissue scores.h5.
+        score_key (str): Score key, e.g. covgene/logFC.
+
+    Returns:
+        str: Targets filename to read alongside scores.h5.
+    """
+    with h5py.File(gtex_scores_file, "r") as h5_file:
+        covgene_depth = h5_file[score_key].shape[-1]
+
+    scores_dir = os.path.dirname(gtex_scores_file)
+    for targets_name in ("targets_covgene.txt", "targets_cov.txt"):
+        targets_file = os.path.join(scores_dir, targets_name)
+        if os.path.isfile(targets_file):
+            # count rows without a full parse; the caller re-reads the winner
+            with open(targets_file) as targets_open:
+                num_targets = sum(1 for _ in targets_open) - 1  # minus header
+            if num_targets == covgene_depth:
+                return targets_name
+
+    # not ValueError: callers catch that from add_scores to skip a tissue with
+    # unmatched targets, which would silently swallow a genuine layout error
+    raise RuntimeError(
+        f"No targets table matches {score_key} width {covgene_depth} in "
+        f"{scores_dir}"
+    )
+
+
+def discover_tissues(dir_glob, suffix, keyword_lookup):
+    """Discover tissues from files/dirs on disk and map them to keywords.
+
+    Args:
+        dir_glob: glob pattern matching one file/dir per tissue.
+        suffix: suffix to strip from each match's basename to get the tissue label.
+        keyword_lookup: dict mapping tissue label to matching keyword.
+
+    Yields:
+        (tissue_label, keyword) pairs for labels found in keyword_lookup.
+    """
+    for path in sorted(glob.glob(dir_glob)):
+        tissue_label = os.path.basename(path).removesuffix(suffix)
+        if tissue_label == "merge":
+            continue
+        keyword = keyword_lookup.get(tissue_label)
+        if keyword is None:
+            print(f"Skipping {tissue_label}: no keyword mapping.", file=sys.stderr)
+            continue
+        yield tissue_label, keyword
 
 
 def trim_dot(gene_id):

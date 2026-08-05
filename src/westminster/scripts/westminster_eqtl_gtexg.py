@@ -11,9 +11,11 @@ from scipy.stats import spearmanr
 from sklearn.metrics import average_precision_score, roc_auc_score
 
 from westminster.gtex import (
+    covgene_targets_name,
+    discover_tissues,
+    gtex_keywords,
     match_tissue_targets,
     read_gene_tss,
-    tissue_keywords,
     trim_dot,
     variant_pos,
 )
@@ -82,7 +84,10 @@ def main():
     egene_metrics_rows = []
     egene_dist_rows = []
 
-    for tissue, keyword in tissue_keywords.items():
+    tissues = discover_tissues(
+        f"{args.gtex_vcf_dir}/*_pos.vcf", "_pos.vcf", gtex_keywords
+    )
+    for tissue, keyword in tissues:
         if args.verbose:
             print(tissue)
 
@@ -354,7 +359,8 @@ def _match_tissue_targets(
         gene_targets = True
     elif score_key.startswith("covgene/"):
         # covgene/ stats span the gene-track subset, indexed by targets_covgene.txt
-        targets_name = "targets_covgene.txt"
+        # (older runs used the full strand-collapsed set; probe to tell them apart)
+        targets_name = covgene_targets_name(gtex_scores_file, score_key)
         gene_targets = False
     else:
         targets_name = "targets_cov.txt"
