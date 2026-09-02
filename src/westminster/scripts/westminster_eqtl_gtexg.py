@@ -11,11 +11,11 @@ from scipy.stats import spearmanr
 from sklearn.metrics import average_precision_score, roc_auc_score
 
 from westminster.gtex import (
-    covgene_targets_name,
     discover_tissues,
     gtex_keywords,
     match_tissue_targets,
     read_gene_tss,
+    read_targets,
     trim_dot,
     variant_pos,
 )
@@ -354,20 +354,7 @@ def _match_tissue_targets(
     verbose: bool = False,
 ):
     """Read targets file and match tissue targets."""
-    if score_key.startswith("gene/"):
-        targets_name = "targets_gene.txt"
-        gene_targets = True
-    elif score_key.startswith("covgene/"):
-        # covgene/ stats span the gene-track subset, indexed by targets_covgene.txt
-        # (older runs used the full strand-collapsed set; probe to tell them apart)
-        targets_name = covgene_targets_name(gtex_scores_file, score_key)
-        gene_targets = False
-    else:
-        targets_name = "targets_cov.txt"
-        gene_targets = False
-    targets_file = gtex_scores_file.replace("scores.h5", targets_name)
-    targets_df = pd.read_csv(targets_file, sep="\t", index_col=0)
-
+    targets_df, gene_targets = read_targets(gtex_scores_file, score_key)
     match_tis = match_tissue_targets(targets_df, keyword, gene_targets, verbose)
 
     if len(match_tis) == 0:
