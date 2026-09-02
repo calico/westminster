@@ -457,21 +457,8 @@ def main():
                     cmd_metrics += f" -o {metrics_out_dir}"
                     cmd_metrics += f" -s {snp_stat}"
                     cmd_metrics += f" {it_out_dir}"
-
-                    if args.backend == "local":
-                        jobs.append(cmd_metrics)
-                    else:
-                        j = slurmrunner.Job(
-                            cmd_metrics,
-                            "metrics",
-                            f"{metrics_out_dir}.out",
-                            f"{metrics_out_dir}.err",
-                            queue="standard",
-                            cpu=2,
-                            mem=22000,
-                            time="12:0:0",
-                        )
-                        jobs.append(j)
+                    cmd_metrics += f" > {metrics_out_dir}.out 2> {metrics_out_dir}.err"
+                    jobs.append(cmd_metrics)
 
     # ensemble
     for snp_stat in snp_stats:
@@ -488,26 +475,10 @@ def main():
             cmd_metrics += f" -o {metrics_out_dir}"
             cmd_metrics += f" -s {snp_stat}"
             cmd_metrics += f" {ens_out_dir}"
+            cmd_metrics += f" > {metrics_out_dir}.out 2> {metrics_out_dir}.err"
+            jobs.append(cmd_metrics)
 
-            if args.backend == "local":
-                jobs.append(cmd_metrics)
-            else:
-                j = slurmrunner.Job(
-                    cmd_metrics,
-                    "metrics",
-                    f"{metrics_out_dir}.out",
-                    f"{metrics_out_dir}.err",
-                    queue="standard",
-                    cpu=2,
-                    mem=22000,
-                    time="12:0:0",
-                )
-                jobs.append(j)
-
-    if args.backend == "local":
-        utils.exec_par(jobs, 3, verbose=True)
-    else:
-        slurmrunner.multi_run(jobs, verbose=True)
+    utils.exec_par(jobs, 3, verbose=True)
 
 
 def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
