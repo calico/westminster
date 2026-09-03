@@ -41,7 +41,7 @@ def main():
     parser.add_argument(
         "-g",
         "--gtex_vcf_dir",
-        default="/home/drk/seqnn/data/gtex_v11/eqtl_pip90",
+        default="/home/drk/seqnn/data/gtex_v11/current/snp/eqtl",
         help="GTEx VCF directory",
     )
     parser.add_argument(

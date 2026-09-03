@@ -246,7 +246,7 @@ def main():
     gtex_group.add_argument(
         "--gtex",
         dest="gtex_vcf_dir",
-        default="/home/drk/seqnn/data/gtex_v11/sqtl_pip90",
+        default="/home/drk/seqnn/data/gtex_v11/current/snp/sqtl",
         help="Directory with GTEx sQTL VCF files",
     )
 
