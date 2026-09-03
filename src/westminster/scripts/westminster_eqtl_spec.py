@@ -111,7 +111,10 @@ def main():
         pairs_df[name] = (
             pair_auroc(np.abs(values), sig) if values is not None else np.nan
         )
-    model_n, slope_n = group_scale(model), group_scale(slope)
+    # zero-fill only after scaling: a group's amplitude must come from the cells
+    # where its slope was measured, not from the absent ones
+    model_n = group_scale(model)
+    slope_n = np.nan_to_num(group_scale(slope))
     pairs_df["slope_spearman"] = pair_spearman(model_n, slope_n)
     pairs_df["sig_spearman"] = pair_spearman(model_n, slope_n, mask=sig)
     pairs_df.loc[pairs_df.n_sig < args.min_sig, "sig_spearman"] = np.nan
@@ -291,7 +294,11 @@ def model_matrix(
 
 
 def slope_matrix(slopes_file: str, pairs_df: pd.DataFrame, groups: list):
-    """Mean tensorQTL slope per (pair, group), zero where there is no signal.
+    """Mean tensorQTL slope per (pair, group), NaN where there is no signal.
+
+    NaN rather than zero because the two mean different things to group_scale:
+    "no effect measured here" must not contribute to a group's amplitude. Callers
+    fill with zero after scaling.
 
     Args:
         slopes_file: spec_slopes.parquet from make_vcfs.build_spec_slopes.
@@ -299,7 +306,7 @@ def slope_matrix(slopes_file: str, pairs_df: pd.DataFrame, groups: list):
         groups: Tissue group axis.
 
     Returns:
-        np.ndarray: (pairs, groups) slope matrix.
+        np.ndarray: (pairs, groups) slope matrix, NaN where not significant.
     """
     slope_df = pd.read_parquet(
         slopes_file, columns=["variant_id", "gene", "tissue", "slope"]
@@ -312,7 +319,7 @@ def slope_matrix(slopes_file: str, pairs_df: pd.DataFrame, groups: list):
         zip(pairs_df.variant.values, pairs_df.gene.values)
     )}
     group_index = {g: i for i, g in enumerate(groups)}
-    slope = np.zeros((len(pairs_df), len(groups)), dtype="float32")
+    slope = np.full((len(pairs_df), len(groups)), np.nan, dtype="float32")
     for (variant, gene, group), value in mean_slope.items():
         pi = pair_index.get((variant, gene))
         if pi is not None:
@@ -351,9 +358,10 @@ def group_scale(values: np.ndarray):
     Group score distributions differ ~2x in scale, so an un-normalized within-pair
     ranking partly reflects which tissues the model was trained on most deeply.
     Dividing by a robust scale about zero equalizes them while preserving sign.
+    NaN marks an unmeasured cell and is excluded from its group's scale.
 
     Args:
-        values: (pairs, groups) matrix.
+        values: (pairs, groups) matrix, NaN where unmeasured.
 
     Returns:
         np.ndarray: Rescaled matrix.
