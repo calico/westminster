@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 import argparse
 import os
-import re
 import sys
 
 import h5py
@@ -11,11 +10,11 @@ from scipy.stats import spearmanr
 from sklearn.metrics import average_precision_score, roc_auc_score
 
 from westminster.gtex import (
-    covgene_targets_name,
     discover_tissues,
     gtex_keywords,
     match_tissue_targets,
     read_gene_tss,
+    read_targets,
     trim_dot,
     variant_pos,
 )
@@ -41,7 +40,7 @@ def main():
     parser.add_argument(
         "-g",
         "--gtex_vcf_dir",
-        default="/home/drk/seqnn/data/gtex_v11/eqtl_pip90",
+        default="/home/drk/seqnn/data/gtex_v11/snp/eqtl",
         help="GTEx VCF directory",
     )
     parser.add_argument(
@@ -324,9 +323,6 @@ def read_eqtl_ems(tissue: str, gtex_vcf_dir: str, pip_t: float = 0.9):
     df_eqtl = pd.read_csv(eqtl_file, sep="\t", index_col=0)
 
     # pip filter
-    pip_match = re.search(r"_pip(\d+).+$", gtex_vcf_dir).group(1)
-    pip_t = float(pip_match) / 100
-    assert pip_t > 0 and pip_t <= 1
     df_causal = df_eqtl[df_eqtl.pip > pip_t]
 
     # make table
@@ -354,20 +350,7 @@ def _match_tissue_targets(
     verbose: bool = False,
 ):
     """Read targets file and match tissue targets."""
-    if score_key.startswith("gene/"):
-        targets_name = "targets_gene.txt"
-        gene_targets = True
-    elif score_key.startswith("covgene/"):
-        # covgene/ stats span the gene-track subset, indexed by targets_covgene.txt
-        # (older runs used the full strand-collapsed set; probe to tell them apart)
-        targets_name = covgene_targets_name(gtex_scores_file, score_key)
-        gene_targets = False
-    else:
-        targets_name = "targets_cov.txt"
-        gene_targets = False
-    targets_file = gtex_scores_file.replace("scores.h5", targets_name)
-    targets_df = pd.read_csv(targets_file, sep="\t", index_col=0)
-
+    targets_df, gene_targets = read_targets(gtex_scores_file, score_key)
     match_tis = match_tissue_targets(targets_df, keyword, gene_targets, verbose)
 
     if len(match_tis) == 0:

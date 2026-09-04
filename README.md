@@ -21,6 +21,13 @@ export PATH=$WESTMINSTER_DIR/src/westminster/scripts:$PATH
 export PYTHONPATH=$WESTMINSTER_DIR/src/westminster/scripts:$PYTHONPATH
 ```
 
+### Benchmark data
+
+The fine-mapped GTEx QTL sets used by `westminster_{eqtl,sqtl,paqtl}_folds.py` are
+built and released by [calico/qtl-bench](https://github.com/calico/qtl-bench).
+Fetch a release and point `--vcf_dir` at one of its set directories, e.g.
+`data/gtex11/snp/eqtl`.
+
 ---
 
 #### Contacts

@@ -2,7 +2,6 @@
 import argparse
 import os
 import pdb
-import re
 import sys
 
 import h5py
@@ -32,7 +31,7 @@ def main():
     parser.add_argument(
         "-g",
         "--gtex_vcf_dir",
-        default="/home/drk/seqnn/data/gtex_v11/eqtl_pip90",
+        default="/home/drk/seqnn/data/gtex_v11/snp/eqtl",
         help="GTEx VCF directory",
     )
     parser.add_argument(
@@ -255,9 +254,6 @@ def read_eqtl_ems(tissue: str, tissue_vcf_file: str, pip_t: float = 0.9):
     df_eqtl = pd.read_csv(eqtl_file, sep="\t", index_col=0)
 
     # pip filter
-    pip_match = re.search(r"_pip(\d+)", tissue_vcf_file).group(1)
-    pip_t = float(pip_match) / 100
-    assert pip_t > 0 and pip_t <= 1
     df_causal = df_eqtl[df_eqtl.pip > pip_t]
 
     # remove variants with inconsistent signs

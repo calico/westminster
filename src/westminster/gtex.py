@@ -4,6 +4,7 @@ import sys
 
 import h5py
 import numpy as np
+import pandas as pd
 import pybedtools
 
 txrev_keywords = {
@@ -169,6 +170,30 @@ def covgene_targets_name(gtex_scores_file: str, score_key: str):
         f"No targets table matches {score_key} width {covgene_depth} in "
         f"{scores_dir}"
     )
+
+
+def read_targets(gtex_scores_file: str, score_key: str):
+    """Read the targets table indexing a score's track axis.
+
+    Args:
+        gtex_scores_file (str): Path to a scores.h5.
+        score_key (str): Score key, e.g. covgene/logFC.
+
+    Returns:
+        (pd.DataFrame, bool): Targets table, and whether these are gene targets
+            (which match_tissue_targets treats differently).
+    """
+    if score_key.startswith("gene/"):
+        targets_name, gene_targets = "targets_gene.txt", True
+    elif score_key.startswith("covgene/"):
+        # covgene/ stats span the gene-track subset, indexed by targets_covgene.txt
+        # (older runs used the full strand-collapsed set; probe to tell them apart)
+        targets_name = covgene_targets_name(gtex_scores_file, score_key)
+        gene_targets = False
+    else:
+        targets_name, gene_targets = "targets_cov.txt", False
+    targets_file = gtex_scores_file.replace("scores.h5", targets_name)
+    return pd.read_csv(targets_file, sep="\t", index_col=0), gene_targets
 
 
 def discover_tissues(dir_glob, suffix, keyword_lookup):
