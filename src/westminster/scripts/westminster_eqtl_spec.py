@@ -43,7 +43,7 @@ def main():
     parser.add_argument(
         "-g",
         "--gtex_vcf_dir",
-        default="/home/drk/seqnn/data/gtex_v11/current/snp/eqtl",
+        default="/home/drk/seqnn/data/gtex_v11/snp/eqtl",
         help="GTEx VCF directory, holding *_pos.vcf and spec_slopes.parquet",
     )
     parser.add_argument(
