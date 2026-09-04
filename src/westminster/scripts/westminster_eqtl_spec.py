@@ -76,7 +76,14 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
-    merge_file = f"{args.gtex_dir}/merge_pos/scores.h5"
+    # "merge" is the current name; "merge_pos" is what older scored runs wrote.
+    merge_file = next(
+        (f for d in ("merge", "merge_pos")
+         if os.path.isfile(f := f"{args.gtex_dir}/{d}/scores.h5")),
+        None,
+    )
+    if merge_file is None:
+        parser.error(f"No merge/scores.h5 under {args.gtex_dir}")
 
     groups, group_cols = resolve_groups(merge_file, args.snp_stat, args.verbose)
     pd.DataFrame(
@@ -90,6 +97,8 @@ def main():
     pairs_df, model = model_matrix(
         merge_file, args.snp_stat, group_cols, pos_df, args.shuffle
     )
+    if len(pairs_df) == 0:
+        parser.error(f"{merge_file} scores none of {args.gtex_vcf_dir}'s pairs")
     sig = sig[pairs_df.index.values]
     pairs_df = pairs_df.reset_index(drop=True)
     print(f"Scored pairs:   {len(pairs_df):,} ({len(pairs_df) / len(pos_df):.1%})")
@@ -114,9 +123,13 @@ def main():
     # zero-fill only after scaling: a group's amplitude must come from the cells
     # where its slope was measured, not from the absent ones
     model_n = group_scale(model)
-    slope_n = np.nan_to_num(group_scale(slope))
-    pairs_df["slope_spearman"] = pair_spearman(model_n, slope_n)
-    pairs_df["sig_spearman"] = pair_spearman(model_n, slope_n, mask=sig)
+    slope_n = group_scale(slope)
+    pairs_df["slope_spearman"] = pair_spearman(model_n, np.nan_to_num(slope_n))
+    # a fine-mapped group whose slope was never measured would otherwise be scored
+    # against a fabricated zero, so restrict to cells the parquet actually reports
+    pairs_df["sig_spearman"] = pair_spearman(
+        model_n, slope_n, mask=sig & np.isfinite(slope)
+    )
     pairs_df.loc[pairs_df.n_sig < args.min_sig, "sig_spearman"] = np.nan
 
     pairs_df.to_csv(
@@ -125,8 +138,8 @@ def main():
     np.savez_compressed(
         f"{args.out_dir}/vectors.npz",
         groups=np.array(groups),
-        variant=pairs_df.variant.values,
-        gene=pairs_df.gene.values,
+        variant=np.asarray(pairs_df.variant, dtype=str),
+        gene=np.asarray(pairs_df.gene, dtype=str),
         model=model,
         slope=slope,
         sig=sig,
@@ -272,8 +285,9 @@ def model_matrix(
                 keep.append(pi)
 
         # h5py fancy selection requires increasing indices; restore pair order after
+        rows = np.array(rows, dtype=int)
         order = np.argsort(rows, kind="stable")
-        scores = h5_file[score_key][np.array(rows)[order].tolist()].astype("float32")
+        scores = h5_file[score_key][rows[order].tolist()].astype("float32")
         scores = scores[np.argsort(order, kind="stable")]
 
     model = np.stack([scores[:, group_cols[g]].mean(axis=1) for g in groups], axis=1)
@@ -283,7 +297,8 @@ def model_matrix(
         [
             ref_allele[snp_to_index[v]] != v.split("_")[2]
             for v in pairs_df.variant.values
-        ]
+        ],
+        dtype=bool,
     )
     model[flip] *= -1
 
