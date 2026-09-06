@@ -17,11 +17,12 @@ westminster_eqtl_spec
 Cross-tissue specificity of predicted eQTL effects: for each fine-mapped
 (variant, gene) pair, does the model put the effect in the right tissues?
 
-The model resolves coarse tissue groups (brain, heart, ...), not GTEx's 49 fine
-tissues, so both predictions and measurements are collapsed onto that axis. Per
-pair we form a model vector over groups (mean logFC across the group's GTEx
-tracks, oriented ref->alt) and compare it to two measurements: which groups the
-pair is fine-mapped in, and its tensorQTL slope in each group.
+Most models resolve coarse tissue groups (brain, heart, ...), not GTEx's 50 fine
+tissues, so both predictions and measurements are collapsed onto that axis; pass
+--native for a model carrying a track per GTEx tissue. Per pair we form a model
+vector over groups (mean logFC across the group's GTEx tracks, oriented
+ref->alt) and compare it to two measurements: which groups the pair is
+fine-mapped in, and its tensorQTL slope in each group.
 """
 
 # n_sig strata (lower-inclusive, upper-exclusive) for the summary table.
@@ -67,6 +68,17 @@ def main():
         help="Minimum significant groups for sig_spearman. [Default: %(default)s]",
     )
     parser.add_argument(
+        "--native",
+        action="store_true",
+        help="Score GTEx's own tissues rather than keyword groups, for models "
+        "with a track per tissue",
+    )
+    parser.add_argument(
+        "--drop_groups",
+        default="",
+        help="Comma-separated groups to exclude, to match a narrower model's axis",
+    )
+    parser.add_argument(
         "--shuffle",
         action="store_true",
         help="Null control: permute each pair's model vector across groups",
@@ -85,13 +97,30 @@ def main():
     if merge_file is None:
         parser.error(f"No merge/scores.h5 under {args.gtex_dir}")
 
-    groups, group_cols = resolve_groups(merge_file, args.snp_stat, args.verbose)
+    tmap = tissue_map(args.native)
+    axis = set(tmap.values())
+    drop = {g.strip() for g in args.drop_groups.split(",") if g.strip()}
+    # a misspelled name would otherwise fail to drop and silently widen the axis,
+    # which is the one thing this flag exists to prevent
+    if drop - axis:
+        parser.error(f"--drop_groups: not tissue groups: {sorted(drop - axis)}")
+
+    groups, group_cols = resolve_groups(
+        merge_file, args.snp_stat, tmap, drop, args.verbose
+    )
+    # a coarse model still matches ~14 tissue names, since a track labelled liver
+    # matches the tissue Liver, and would report group-level results as per-tissue
+    if args.native and len(groups) < len(axis):
+        parser.error(
+            f"--native resolved {len(groups)} of {len(axis)} GTEx tissues; this "
+            "model's tracks are not per-tissue"
+        )
     pd.DataFrame(
         {"group": groups, "tracks": [len(group_cols[g]) for g in groups]}
     ).to_csv(f"{args.out_dir}/groups.tsv", sep="\t", index=False)
     print(f"Tissue groups: {len(groups)}")
 
-    pos_df, sig = read_positives(args.gtex_vcf_dir, groups)
+    pos_df, sig = read_positives(args.gtex_vcf_dir, groups, tmap)
     print(f"Positive pairs: {len(pos_df):,}")
 
     pairs_df, model = model_matrix(
@@ -104,9 +133,9 @@ def main():
     print(f"Scored pairs:   {len(pairs_df):,} ({len(pairs_df) / len(pos_df):.1%})")
 
     slope = slope_matrix(
-        f"{args.gtex_vcf_dir}/spec_slopes.parquet", pairs_df, groups
+        f"{args.gtex_vcf_dir}/spec_slopes.parquet", pairs_df, groups, tmap
     )
-    tpm = tpm_matrix(args.tpm_gct, pairs_df, groups) if args.tpm_gct else None
+    tpm = tpm_matrix(args.tpm_gct, pairs_df, groups, tmap) if args.tpm_gct else None
     if tpm is not None:
         pairs_df["expressed_all"] = (tpm >= TPM_EXPRESSED).all(axis=1)
 
@@ -156,12 +185,34 @@ def main():
 ################################################################################
 # inputs
 ################################################################################
-def resolve_groups(merge_file: str, score_key: str, verbose: bool = False):
+def tissue_map(native: bool = False):
+    """GTEx tissue -> group axis: keyword groups, or one group per tissue.
+
+    Native resolution is only available to models with a track per GTEx tissue;
+    the lowercase tissue label is what match_tissue_targets looks for in a
+    target description.
+
+    TODO(deprecate): once every model carries per-tissue GTEx tracks, native is
+    the only axis worth scoring. Drop this, --native and --drop_groups, and take
+    the group axis straight from the tissues.
+    """
+    return {t: t.lower() for t in gtex_keywords} if native else dict(gtex_keywords)
+
+
+def resolve_groups(
+    merge_file: str,
+    score_key: str,
+    tmap: dict,
+    drop: set = frozenset(),
+    verbose: bool = False,
+):
     """Tissue groups the model resolves, and each one's track columns.
 
     Args:
         merge_file: Path to merge_pos/scores.h5.
         score_key: Pair-indexed statistic, e.g. covgene/logFC.
+        tmap: GTEx tissue -> group, from tissue_map.
+        drop: Groups to exclude, to match another model's narrower axis.
         verbose: Print each group's matched targets.
 
     Returns:
@@ -170,7 +221,7 @@ def resolve_groups(merge_file: str, score_key: str, verbose: bool = False):
     """
     targets_df, gene_targets = read_targets(merge_file, score_key)
     group_cols = {}
-    for keyword in sorted(set(gtex_keywords.values())):
+    for keyword in sorted(set(tmap.values()) - set(drop)):
         match_tis = match_tissue_targets(targets_df, keyword, gene_targets, verbose)
         if len(match_tis) > 0:
             group_cols[keyword] = match_tis
@@ -192,12 +243,13 @@ def _nanmean(values):
     return float(np.mean(present)) if present else np.nan
 
 
-def read_positives(gtex_vcf_dir: str, groups: list):
+def read_positives(gtex_vcf_dir: str, groups: list, tmap: dict):
     """Read fine-mapped positives from the per-tissue VCFs, pooled by group.
 
     Args:
         gtex_vcf_dir: Directory of {tissue}_pos.vcf files.
         groups: Tissue group axis.
+        tmap: GTEx tissue -> group, from tissue_map.
 
     Returns:
         (pd.DataFrame, np.ndarray): One row per unique (variant, gene) pair with
@@ -212,7 +264,7 @@ def read_positives(gtex_vcf_dir: str, groups: list):
             cols = line.split("\t")
             info = dict(f.split("=", 1) for f in cols[7].split(";") if "=" in f)
             gene = info.get("GENE", "")
-            gi = group_idx.get(gtex_keywords.get(info.get("TISSUE", "")), None)
+            gi = group_idx.get(tmap.get(info.get("TISSUE", "")), None)
             if not gene or gi is None:
                 continue
             key = (cols[2], gene)
@@ -308,7 +360,7 @@ def model_matrix(
     return pairs_df, model
 
 
-def slope_matrix(slopes_file: str, pairs_df: pd.DataFrame, groups: list):
+def slope_matrix(slopes_file: str, pairs_df: pd.DataFrame, groups: list, tmap: dict):
     """Mean tensorQTL slope per (pair, group), NaN where there is no signal.
 
     NaN rather than zero because the two mean different things to group_scale:
@@ -319,6 +371,7 @@ def slope_matrix(slopes_file: str, pairs_df: pd.DataFrame, groups: list):
         slopes_file: spec_slopes.parquet from make_vcfs.build_spec_slopes.
         pairs_df: Scored pairs, in output order.
         groups: Tissue group axis.
+        tmap: GTEx tissue -> group, from tissue_map.
 
     Returns:
         np.ndarray: (pairs, groups) slope matrix, NaN where not significant.
@@ -326,7 +379,7 @@ def slope_matrix(slopes_file: str, pairs_df: pd.DataFrame, groups: list):
     slope_df = pd.read_parquet(
         slopes_file, columns=["variant_id", "gene", "tissue", "slope"]
     )
-    slope_df["group"] = slope_df.tissue.map(gtex_keywords)
+    slope_df["group"] = slope_df.tissue.map(tmap)
     slope_df = slope_df[slope_df.group.isin(groups)]
     mean_slope = slope_df.groupby(["variant_id", "gene", "group"]).slope.mean()
 
@@ -342,13 +395,14 @@ def slope_matrix(slopes_file: str, pairs_df: pd.DataFrame, groups: list):
     return slope
 
 
-def tpm_matrix(tpm_gct: str, pairs_df: pd.DataFrame, groups: list):
+def tpm_matrix(tpm_gct: str, pairs_df: pd.DataFrame, groups: list, tmap: dict):
     """Mean GTEx median TPM per (pair's gene, group).
 
     Args:
         tpm_gct: GTEx median TPM GCT (2 header lines, then Name/Description/tissues).
         pairs_df: Scored pairs, in output order.
         groups: Tissue group axis.
+        tmap: GTEx tissue -> group, from tissue_map.
 
     Returns:
         np.ndarray: (pairs, groups) expression matrix, NaN for genes absent from
@@ -359,7 +413,7 @@ def tpm_matrix(tpm_gct: str, pairs_df: pd.DataFrame, groups: list):
     )
     tpm_df.index = [trim_dot(g) for g in tpm_df.index]
     tpm_df = tpm_df[~tpm_df.index.duplicated()]
-    tpm_df.columns = [gtex_keywords.get(c) for c in tpm_df.columns]
+    tpm_df.columns = [tmap.get(c) for c in tpm_df.columns]
     group_tpm = tpm_df.loc[:, tpm_df.columns.notna()].T.groupby(level=0).mean().T
     return group_tpm.reindex(index=pairs_df.gene.values, columns=groups).values
 
