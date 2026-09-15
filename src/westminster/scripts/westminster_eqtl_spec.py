@@ -70,8 +70,8 @@ def main():
     parser.add_argument(
         "--native",
         action="store_true",
-        help="Score GTEx's own tissues rather than keyword groups, for models "
-        "with a track per tissue",
+        help="Score matched GTEx tissues rather than keyword groups; requires "
+        "tissue-specific tracks but not coverage of every GTEx tissue",
     )
     parser.add_argument(
         "--drop_groups",
@@ -108,13 +108,6 @@ def main():
     groups, group_cols = resolve_groups(
         merge_file, args.snp_stat, tmap, drop, args.verbose
     )
-    # a coarse model still matches ~14 tissue names, since a track labelled liver
-    # matches the tissue Liver, and would report group-level results as per-tissue
-    if args.native and len(groups) < len(axis):
-        parser.error(
-            f"--native resolved {len(groups)} of {len(axis)} GTEx tissues; this "
-            "model's tracks are not per-tissue"
-        )
     pd.DataFrame(
         {"group": groups, "tracks": [len(group_cols[g]) for g in groups]}
     ).to_csv(f"{args.out_dir}/groups.tsv", sep="\t", index=False)
@@ -188,13 +181,10 @@ def main():
 def tissue_map(native: bool = False):
     """GTEx tissue -> group axis: keyword groups, or one group per tissue.
 
-    Native resolution is only available to models with a track per GTEx tissue;
-    the lowercase tissue label is what match_tissue_targets looks for in a
-    target description.
-
-    TODO(deprecate): once every model carries per-tissue GTEx tracks, native is
-    the only axis worth scoring. Drop this, --native and --drop_groups, and take
-    the group axis straight from the tissues.
+    Native resolution requires tissue-specific tracks; the lowercase tissue
+    label is what match_tissue_targets looks for in a target description.
+    Only matched tissues are scored. Track labels alone do not establish
+    tissue specificity, so callers must choose the appropriate axis.
     """
     return {t: t.lower() for t in gtex_keywords} if native else dict(gtex_keywords)
 
@@ -422,12 +412,11 @@ def tpm_matrix(tpm_gct: str, pairs_df: pd.DataFrame, groups: list, tmap: dict):
 # metrics
 ################################################################################
 def group_scale(values: np.ndarray):
-    """Divide each group column by its amplitude across pairs.
+    """Divide each group column by its median absolute value across pairs.
 
-    Group score distributions differ ~2x in scale, so an un-normalized within-pair
-    ranking partly reflects which tissues the model was trained on most deeply.
-    Dividing by a robust scale about zero equalizes them while preserving sign.
-    NaN marks an unmeasured cell and is excluded from its group's scale.
+    This adjusts for differences in scale between groups while preserving sign.
+    NaN marks an unmeasured cell and is excluded from the median. Columns with
+    zero or undefined medians are left unchanged.
 
     Args:
         values: (pairs, groups) matrix, NaN where unmeasured.
