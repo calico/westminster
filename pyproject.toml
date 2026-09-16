@@ -18,6 +18,7 @@ dependencies = [
     "numpy>=2.3,<3",
     "pandas>=3.0,<4",
     "pybedtools~=0.12",
+    "scipy>=1.13,<2",
     "tabulate~=0.9",
     "xgboost>=2.1,<4",
 ]
@@ -44,6 +45,7 @@ westminster_gnomad_folds = "westminster.scripts.westminster_gnomad_folds:main"
 westminster_gtex_cmp = "westminster.scripts.westminster_gtex_cmp:main"
 westminster_paqtl_folds = "westminster.scripts.westminster_paqtl_folds:main"
 westminster_paqtl_gtex = "westminster.scripts.westminster_paqtl_gtex:main"
+westminster_qtl_cmp = "westminster.scripts.westminster_qtl_cmp:main"
 westminster_sqtl_folds = "westminster.scripts.westminster_sqtl_folds:main"
 westminster_sqtl_gtex = "westminster.scripts.westminster_sqtl_gtex:main"
 
