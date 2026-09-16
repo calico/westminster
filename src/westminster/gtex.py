@@ -1,5 +1,6 @@
 import glob
 import os
+import re
 import sys
 
 import h5py
@@ -278,6 +279,94 @@ def vcf_info_dist(vcf_file: str, tag: str):
                 dist_map[variant] = int(field[len(prefix) :])
                 break
     return dist_map
+
+
+_INFO_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)=([^;\s]+)")
+
+
+def parse_vcf_info(vcf_file: str, fields):
+    """Parse selected INFO fields from a VCF. Returns DataFrame indexed by variant ID.
+
+    Numeric-looking values are coerced to float; '.' becomes NaN.
+    """
+    rows = []
+    with open(vcf_file) as fh:
+        for line in fh:
+            if line.startswith("#"):
+                continue
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 8:
+                continue
+            kv = dict(_INFO_RE.findall(parts[7]))
+            row = {"variant": parts[2]}
+            for f in fields:
+                v = kv.get(f)
+                if v is None or v == ".":
+                    row[f] = np.nan
+                else:
+                    try:
+                        row[f] = float(v)
+                    except ValueError:
+                        row[f] = v
+            rows.append(row)
+    return pd.DataFrame(rows).drop_duplicates("variant").set_index("variant")
+
+
+def load_match_attributes(vcf_dir: str, tissue: str, fields):
+    """Per-variant DataFrame of positive-only INFO fields, broadcast from each
+    positive to its matched negative via {tissue}_matches.tsv.
+
+    Every attribute is a property of the *positive*; a matched negative inherits
+    its positive's values, so the pair always lands in the same stratum and a
+    classification metric stays paired inside it.
+
+    Returns a DataFrame indexed by variant; suitable for df.join(...).
+    """
+    pos_vcf = f"{vcf_dir}/{tissue}_pos.vcf"
+    matches_path = f"{vcf_dir}/{tissue}_matches.tsv"
+    if not os.path.isfile(pos_vcf) or not os.path.isfile(matches_path):
+        return pd.DataFrame(columns=fields)
+    info = parse_vcf_info(pos_vcf, fields)
+    matches = pd.read_csv(
+        matches_path, sep="\t", usecols=["pos_variant", "neg_variant"]
+    )
+    pos_rows = info.reindex(matches["pos_variant"]).copy()
+    pos_rows.index = matches["pos_variant"].values
+    neg_rows = info.reindex(matches["pos_variant"]).copy()
+    neg_rows.index = matches["neg_variant"].values
+    out = pd.concat([pos_rows, neg_rows])
+    out.index.name = "variant"
+    return out[~out.index.duplicated(keep="first")]
+
+
+def _tissues_in_dir(metric_dir: str):
+    """Stems of *.tsv files in metric_dir, excluding files named 'metrics*'."""
+    return {
+        os.path.basename(f)[:-4]
+        for f in glob.glob(f"{metric_dir}/*.tsv")
+        if not os.path.basename(f).startswith("metrics")
+    }
+
+
+def load_qtl_pools(vcf_dir: str, fields, *metric_dirs):
+    """Load per-tissue annotated QTL tables from one or more metric directories.
+
+    Each metric directory is one model's `westminster_{eqtl,sqtl,paqtl}_gtex`
+    output: a `{tissue}.tsv` per tissue carrying variant, label, coef, pred.
+
+    Returns (sorted shared tissue list, [pool dict per directory]) where each
+    pool maps tissue -> DataFrame with the positive-only INFO `fields` joined
+    via `load_match_attributes` (and broadcast to matched negatives).
+    """
+    tissues = sorted(set.intersection(*[_tissues_in_dir(d) for d in metric_dirs]))
+    pools = []
+    for d in metric_dirs:
+        pool = {}
+        for t in tissues:
+            df = pd.read_csv(f"{d}/{t}.tsv", sep="\t", index_col=0)
+            pool[t] = df.join(load_match_attributes(vcf_dir, t, fields), on="variant")
+        pools.append(pool)
+    return tissues, pools
 
 
 def vcf_tss_dist(vcf_file, genes_bed_file):
