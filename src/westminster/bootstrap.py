@@ -431,20 +431,20 @@ def cluster_stats(
 ################################################################################
 # statistic 2: one row per variant, collapsed over tissues
 ################################################################################
-def _long(pool, select):
-    """Every (variant, tissue) row of a stratum, stacked across tissues."""
+def _long(pool, select, cor_col=None):
+    """Every (variant, tissue) row of a stratum, stacked across tissues.
+
+    The measured effect size is carried only when a correlation needs it; sQTL
+    and paQTL tables have none to carry.
+    """
+    cols = ["variant", "tissue", "pred", "label"] + ([cor_col] if cor_col else [])
     return pd.concat(
-        [
-            select(df)
-            .assign(tissue=t)
-            .reset_index()[["variant", "tissue", "pred", "coef", "label"]]
-            for t, df in pool.items()
-        ],
+        [select(df).assign(tissue=t).reset_index()[cols] for t, df in pool.items()],
         ignore_index=True,
     )
 
 
-def _collapse(pool, select, pick=None):
+def _collapse(pool, select, pick=None, cor_col=None):
     """One row per unique variant, aggregated over the tissues it appears in.
 
     `pick` maps variant to a single tissue to keep instead of averaging, which
@@ -452,14 +452,15 @@ def _collapse(pool, select, pick=None):
     tissues share their variants. Both models must be handed the same map or
     the comparison stops being paired.
     """
-    long = _long(pool, select)
+    long = _long(pool, select, cor_col)
     both = long.groupby("variant")["label"].nunique()
     long = long[long.variant.map(both) == 1]  # never both pos and neg
     if pick is not None:
         long = long[long.tissue == long.variant.map(pick)]
-    return long.groupby("variant").agg(
-        pred=("pred", "mean"), coef=("coef", "mean"), label=("label", "first")
-    )
+    spec = dict(pred=("pred", "mean"), label=("label", "first"))
+    if cor_col:
+        spec[cor_col] = (cor_col, "mean")
+    return long.groupby("variant").agg(**spec)
 
 
 def one_tissue_pick(pool, seed=0):
@@ -478,8 +479,21 @@ def one_tissue_pick(pool, seed=0):
     )
 
 
+def _unscorable(n_pos, n_neg):
+    """A stratum with nothing to compare: its counts, and NaN for the rest."""
+    nans = {k: np.nan for k in ("m1", "m2", "delta", "lo", "hi", "p")}
+    return dict(nans, n_pos=n_pos, n_neg=n_neg)
+
+
 def collapse_stats(
-    pools, select=None, *, metric="auprc", pick=None, n_boot=N_BOOT, seed=0
+    pools,
+    select=None,
+    *,
+    metric="auprc",
+    cor_col="coef",
+    pick=None,
+    n_boot=N_BOOT,
+    seed=0,
 ):
     """Bootstrap a metric over variants collapsed to one row each.
 
@@ -487,8 +501,13 @@ def collapse_stats(
     select: DataFrame -> DataFrame picking the stratum out of one tissue's table;
         defaults to the whole table.
     metric: 'auprc' or 'auroc' over |pred| against the matched negatives, or
-        'spearman' between signed pred and `coef` over the positives alone.
+        'spearman' between signed pred and `cor_col` over the positives alone.
+    cor_col: measured effect size column, read only by 'spearman'.
     pick: optional variant -> tissue map from `one_tissue_pick`.
+
+    A stratum holding one class, or too few positives to rank, is returned with
+    its counts and NaN statistics rather than raising, so one empty bin cannot
+    cost a caller the whole table.
 
     Tissue is not the unit of replication once each variant enters once, so the
     interval resamples variants — positives and negatives separately for the
@@ -504,7 +523,8 @@ def collapse_stats(
         def select(df):
             return df
 
-    a, c = (_collapse(p, select, pick) for p in pools)
+    need = cor_col if metric == "spearman" else None
+    a, c = (_collapse(p, select, pick, need) for p in pools)
     common = a.index.intersection(c.index)
     a, c = a.loc[common], c.loc[common]
 
@@ -518,18 +538,20 @@ def collapse_stats(
             (a.label == "pos")
             & np.isfinite(a.pred)
             & np.isfinite(c.pred)
-            & np.isfinite(a.coef)
+            & np.isfinite(a[cor_col])
         ).to_numpy()
         s1, s2 = a.pred.to_numpy()[ok], c.pred.to_numpy()[ok]
-        target = a.coef.to_numpy()[ok]
+        target = a[cor_col].to_numpy()[ok]
         variant = a.index.to_numpy()[ok]
+        n_pos, n_neg = int(target.size), np.nan
+        if n_pos < 2:  # rho undefined
+            return _unscorable(n_pos, n_neg)
         index = cluster_index(variant)
         strata = [np.arange(index[2].size)]
 
         def statistic(i):
             return rho(s2[i], target[i]) - rho(s1[i], target[i])
 
-        n_pos, n_neg = int(target.size), np.nan
     else:
         fn = _METRIC_FNS[metric]
         y = (a.label == "pos").to_numpy().astype(int)
@@ -537,6 +559,9 @@ def collapse_stats(
         keep = np.isfinite(s1) & np.isfinite(s2)
         y, s1, s2 = y[keep], s1[keep], s2[keep]
         variant = a.index.to_numpy()[keep]
+        n_pos, n_neg = int(y.sum()), int((1 - y).sum())
+        if not (n_pos and n_neg):  # one class: AUROC and AUPRC undefined
+            return _unscorable(n_pos, n_neg)
         index = cluster_index(variant)
         vpos = np.zeros(index[2].size, bool)
         vpos[index[3][y == 1]] = True
@@ -545,10 +570,9 @@ def collapse_stats(
         def statistic(i):
             return fn(y[i], s2[i]) - fn(y[i], s1[i])
 
-        n_pos, n_neg = int(y.sum()), int((1 - y).sum())
-
     delta, boots = variant_bootstrap(index, strata, statistic, n_boot=n_boot, seed=seed)
     finite = boots[np.isfinite(boots)]
+    lo, hi = np.quantile(finite, [0.025, 0.975]) if finite.size else (np.nan, np.nan)
     if metric == "spearman":
         m1, m2 = rho(s1, target), rho(s2, target)
     else:
@@ -557,8 +581,8 @@ def collapse_stats(
         "m1": m1,
         "m2": m2,
         "delta": float(delta),
-        "lo": np.quantile(finite, 0.025),
-        "hi": np.quantile(finite, 0.975),
+        "lo": lo,
+        "hi": hi,
         "p": boot_pvalue(boots, n_boot),
         "n_pos": n_pos,
         "n_neg": n_neg,

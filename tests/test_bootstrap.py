@@ -1,3 +1,5 @@
+from argparse import Namespace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -14,6 +16,7 @@ from westminster.bootstrap import (
     spearman,
     variant_bootstrap,
 )
+from westminster.scripts.westminster_qtl_cmp import tissue_unit_table
 
 
 ################################################################################
@@ -223,9 +226,68 @@ def test_collapse_stats_select_narrows_the_stratum():
     assert res["n_pos"] == 15
 
 
+def test_collapse_stats_without_an_effect_size_column():
+    """sQTL and paQTL tables carry no coef; classification must not need one."""
+    pools = tuple(
+        {t: df.drop(columns="coef") for t, df in pool.items()}
+        for pool in make_pools(edge=0.8)
+    )
+    res = collapse_stats(pools, metric="auprc", n_boot=100)
+    assert res["delta"] > 0
+
+
+def test_collapse_stats_honors_cor_col():
+    """Correlating against the negated column must flip the delta, not ignore it."""
+    pools = tuple(
+        {t: df.assign(negcoef=-df.coef) for t, df in pool.items()}
+        for pool in make_pools(edge=0.8)
+    )
+    kw = dict(metric="spearman", n_boot=100)
+    plain = collapse_stats(pools, **kw)
+    flipped = collapse_stats(pools, cor_col="negcoef", **kw)
+    assert flipped["delta"] == pytest.approx(-plain["delta"])
+    assert flipped["m1"] == pytest.approx(-plain["m1"])
+
+
+@pytest.mark.parametrize(
+    "select,n_pos,n_neg",
+    [
+        (lambda df: df.iloc[:0], 0, 0),  # empty bin
+        (lambda df: df[df.label == "pos"], 30, 0),  # one class
+    ],
+)
+def test_collapse_stats_returns_nan_for_unscorable_strata(select, n_pos, n_neg):
+    """One dead bin must cost its own row, not the whole table."""
+    res = collapse_stats(make_pools(), select, metric="auprc", n_boot=50)
+    assert (res["n_pos"], res["n_neg"]) == (n_pos, n_neg)
+    assert all(np.isnan(res[k]) for k in ("m1", "m2", "delta", "lo", "hi", "p"))
+
+
 def test_one_tissue_pick_keeps_sign():
     pools = make_pools(edge=0.8)
     pick = one_tissue_pick(pools[1])
     assert set(pick) == {f"v{i}" for i in range(60)}
     res = collapse_stats(pools, metric="auprc", pick=pick, n_boot=100)
     assert res["delta"] > 0
+
+
+################################################################################
+# the CLI's display layer
+################################################################################
+def test_tissue_unit_table_displays_the_requested_agg():
+    """The model columns must combine tissues the same way the delta does."""
+    pools = make_pools(edge=0.3)
+    args = dict(min_n=5, n_boot=50, seed=0, cor_col="coef")
+    tables = {
+        agg: tissue_unit_table(
+            pools,
+            "REGION",
+            ["TSS", "CDS"],
+            "m1",
+            "m2",
+            Namespace(agg=agg, **args),
+            True,
+        )
+        for agg in ("median", "mean")
+    }
+    assert not np.allclose(tables["median"]["m1"], tables["mean"]["m1"])

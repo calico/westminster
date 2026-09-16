@@ -135,6 +135,7 @@ def boot_ci(boots):
 def tissue_unit_table(pools, col, edges, label1, label2, args, do_cor):
     """Per-tissue cells aggregated across tissues, bootstrapped over variants."""
     order = bin_labels(edges)
+    combine = np.nanmean if args.agg == "mean" else np.nanmedian
     common = dict(
         col=col,
         edges=edges,
@@ -160,8 +161,8 @@ def tissue_unit_table(pools, col, edges, label1, label2, args, do_cor):
                 {
                     "bin": b,
                     "metric": met,
-                    label1: np.nanmedian([s.get(b, np.nan) for s in levels[0]]),
-                    label2: np.nanmedian([s.get(b, np.nan) for s in levels[1]]),
+                    label1: combine([s.get(b, np.nan) for s in levels[0]]),
+                    label2: combine([s.get(b, np.nan) for s in levels[1]]),
                     "delta": clf.loc[(b, met), "delta"],
                     "lo": lo,
                     "hi": hi,
@@ -186,8 +187,8 @@ def tissue_unit_table(pools, col, edges, label1, label2, args, do_cor):
                 {
                     "bin": b,
                     "metric": "rho",
-                    label1: np.nanmedian([s.get(b, np.nan) for s in levels[0]]),
-                    label2: np.nanmedian([s.get(b, np.nan) for s in levels[1]]),
+                    label1: combine([s.get(b, np.nan) for s in levels[0]]),
+                    label2: combine([s.get(b, np.nan) for s in levels[1]]),
                     "delta": cor.loc[b, "delta"],
                     "lo": lo,
                     "hi": hi,
@@ -207,6 +208,7 @@ def variant_unit_table(pools, col, edges, args, do_cor):
                 pools,
                 bin_selector(col, edges, b),
                 metric=met,
+                cor_col=args.cor_col,
                 n_boot=args.n_boot,
                 seed=args.seed,
             )
