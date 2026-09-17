@@ -11,8 +11,7 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from westminster.gtex import (
     discover_tissues,
     match_tissue_targets,
-    txrev_keywords,
-    gtex_keywords,
+    tissue_keywords,
     trim_dot,
 )
 
@@ -56,16 +55,19 @@ def main():
         default="covgene/SJ",
         help="SNP statistic. [Default: %(default)s]",
     )
+    parser.add_argument(
+        "--smtsd",
+        action="store_true",
+        help="Match one merged per-SMTSD track per tissue, instead of the "
+        "coarse keywords. Requires merged GTEx targets.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("sqtl_dir")
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
 
-    keyword_lookup = {
-        t.replace("GTEx_txrev_", ""): kw for t, kw in txrev_keywords.items()
-    }
-    keyword_lookup.update(gtex_keywords)
+    keyword_lookup = tissue_keywords(args.smtsd, txrev=True)
 
     metrics_rows = []
 

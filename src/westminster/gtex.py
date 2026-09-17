@@ -115,6 +115,93 @@ gtex_keywords = {
 }
 
 
+# One merged per-SMTSD track per QTL tissue, for target sets built on the
+# tillage 9-1 GTEx merge (seqnn 9-3 onward). Those descriptions are RNA:<smtsd>,
+# so these stay plain substrings and match_tissue_targets is unchanged.
+#
+# Unlike gtex_keywords these are true matches: each Brain_* region hits its own
+# track rather than the 13-region average, and Artery_* hits an artery track
+# rather than heart. Against a single-individual target set they match nothing,
+# which is the intent -- that set cannot resolve SMTSD.
+gtex_smtsd_keywords = {
+    "Adipose_Subcutaneous": "adipose_subcutaneous",
+    "Adipose_Visceral_Omentum": "adipose_visceral_omentum",
+    "Adrenal_Gland": "adrenal_gland",
+    "Artery_Aorta": "artery_aorta",
+    "Artery_Coronary": "artery_coronary",
+    "Artery_Tibial": "artery_tibial",
+    "Bladder": "bladder",
+    "Brain_Amygdala": "brain_amygdala",
+    "Brain_Anterior_cingulate_cortex_BA24": "brain_anterior_cingulate_cortex_ba24",
+    "Brain_Caudate_basal_ganglia": "brain_caudate_basal_ganglia",
+    "Brain_Cerebellar_Hemisphere": "brain_cerebellar_hemisphere",
+    "Brain_Cerebellum": "brain_cerebellum",
+    "Brain_Cortex": "brain_cortex",
+    "Brain_Frontal_Cortex_BA9": "brain_frontal_cortex_ba9",
+    "Brain_Hippocampus": "brain_hippocampus",
+    "Brain_Hypothalamus": "brain_hypothalamus",
+    "Brain_Nucleus_accumbens_basal_ganglia": "brain_nucleus_accumbens_basal_ganglia",
+    "Brain_Putamen_basal_ganglia": "brain_putamen_basal_ganglia",
+    "Brain_Spinal_cord_cervical_c-1": "brain_spinal_cord_cervical_c_1",
+    "Brain_Substantia_nigra": "brain_substantia_nigra",
+    "Breast_Mammary_Tissue": "breast_mammary_tissue",
+    "Cells_Cultured_fibroblasts": "cells_cultured_fibroblasts",
+    # the track is cells_lcl_ebv_transformed_lymphocytes
+    "Cells_EBV-transformed_lymphocytes": "ebv_transformed_lymphocytes",
+    "Colon_Sigmoid": "colon_sigmoid",
+    "Colon_Transverse": "colon_transverse",
+    "Esophagus_Gastroesophageal_Junction": "esophagus_gastroesophageal_junction",
+    "Esophagus_Mucosa": "esophagus_mucosa",
+    "Esophagus_Muscularis": "esophagus_muscularis",
+    "Heart_Atrial_Appendage": "heart_atrial_appendage",
+    "Heart_Left_Ventricle": "heart_left_ventricle",
+    "Kidney_Cortex": "kidney_cortex",
+    "Liver": "liver",
+    "Lung": "lung",
+    "Minor_Salivary_Gland": "minor_salivary_gland",
+    "Muscle_Skeletal": "muscle_skeletal",
+    "Nerve_Tibial": "nerve_tibial",
+    "Ovary": "ovary",
+    "Pancreas": "pancreas",
+    "Pituitary": "pituitary",
+    "Prostate": "prostate",
+    "Skin_Not_Sun_Exposed_Suprapubic": "skin_not_sun_exposed_suprapubic",
+    "Skin_Sun_Exposed_Lower_leg": "skin_sun_exposed_lower_leg",
+    "Small_Intestine_Terminal_Ileum": "small_intestine_terminal_ileum",
+    "Spleen": "spleen",
+    "Stomach": "stomach",
+    "Testis": "testis",
+    "Thyroid": "thyroid",
+    "Uterus": "uterus",
+    "Vagina": "vagina",
+    "Whole_Blood": "whole_blood",
+}
+
+
+def tissue_keywords(smtsd: bool = False, txrev: bool = False):
+    """Return the tissue -> target keyword map for a scoring pass.
+
+    Args:
+        smtsd (bool): Use the 1:1 per-SMTSD map instead of the coarse one.
+        txrev (bool): Also accept the txrev tissue labels. Only meaningful for
+            the coarse map; txrev labels have no SMTSD resolution, so under
+            smtsd they are left out and discover_tissues reports them skipped
+            rather than silently matching a coarse pool.
+
+    Returns:
+        dict: tissue label -> keyword.
+    """
+    if smtsd:
+        return dict(gtex_smtsd_keywords)
+    keywords = {}
+    if txrev:
+        keywords.update(
+            {t.replace("GTEx_txrev_", ""): kw for t, kw in txrev_keywords.items()}
+        )
+    keywords.update(gtex_keywords)
+    return keywords
+
+
 def match_tissue_targets(targets_df, keyword, gene_targets=False, verbose=False):
     """Return array of target indices matching a GTEx tissue keyword."""
     target_ids = targets_df.identifier.values

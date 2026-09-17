@@ -172,7 +172,7 @@ def main():
         help="Subset of folds to evaluate (encoded as comma-separated string)",
     )
     fold_group.add_argument(
-        "--name", dest="name", default="snp", help="SLURM name prefix"
+        "--name", dest="name", default="eqtl", help="SLURM name prefix"
     )
     fold_group.add_argument(
         "-p",
@@ -247,6 +247,13 @@ def main():
         default=False,
         action="store_true",
         help="Use the legacy EMS pipeline (reads susie TSV instead of VCF INFO)",
+    )
+    gtex_group.add_argument(
+        "--smtsd",
+        default=False,
+        action="store_true",
+        help="Match one merged per-SMTSD track per tissue; writes to "
+        "metrics-{stat}-smtsd, leaving the coarse pass in place",
     )
     # GTEx directory
     gtex_group.add_argument(
@@ -436,13 +443,16 @@ def main():
     ################################################################
     # metrics
 
+    # a --smtsd pass writes beside the coarse one, over the same scores.h5
+    stat_suffix = "-smtsd" if args.smtsd else ""
+
     jobs = []
     for ci in range(args.crosses):
         for fi in fold_index:
             it_dir = f"{args.models_dir}/f{fi}c{ci}"
             it_out_dir = f"{it_dir}/{gtex_out_dir}"
             for snp_stat in snp_stats:
-                stat_label = snp_stat.replace("/", "-")
+                stat_label = snp_stat.replace("/", "-") + stat_suffix
                 metrics_out_dir = f"{it_out_dir}/metrics-{stat_label}"
 
                 if not os.path.isfile(f"{metrics_out_dir}/metrics.tsv"):
@@ -454,6 +464,8 @@ def main():
                         )
                     if args.ems:
                         cmd_metrics += " --ems"
+                    if args.smtsd:
+                        cmd_metrics += " --smtsd"
                     cmd_metrics += f" -o {metrics_out_dir}"
                     cmd_metrics += f" -s {snp_stat}"
                     cmd_metrics += f" {it_out_dir}"
@@ -462,7 +474,7 @@ def main():
 
     # ensemble
     for snp_stat in snp_stats:
-        stat_label = snp_stat.replace("/", "-")
+        stat_label = snp_stat.replace("/", "-") + stat_suffix
         metrics_out_dir = f"{ens_out_dir}/metrics-{stat_label}"
 
         if not os.path.isfile(f"{metrics_out_dir}/metrics.tsv"):
@@ -472,6 +484,8 @@ def main():
                 cmd_metrics = f"westminster_eqtl_gtexg -g {args.gtex_vcf_dir}"
             if args.ems:
                 cmd_metrics += " --ems"
+            if args.smtsd:
+                cmd_metrics += " --smtsd"
             cmd_metrics += f" -o {metrics_out_dir}"
             cmd_metrics += f" -s {snp_stat}"
             cmd_metrics += f" {ens_out_dir}"

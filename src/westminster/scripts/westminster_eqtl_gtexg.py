@@ -11,10 +11,10 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 
 from westminster.gtex import (
     discover_tissues,
-    gtex_keywords,
     match_tissue_targets,
     read_gene_tss,
     read_targets,
+    tissue_keywords,
     trim_dot,
     variant_pos,
 )
@@ -70,6 +70,12 @@ def main():
         "candidates beyond the model's predictable window get no score and are "
         "excluded from metrics.",
     )
+    parser.add_argument(
+        "--smtsd",
+        action="store_true",
+        help="Match one merged per-SMTSD track per tissue, instead of the "
+        "coarse keywords. Requires merged GTEx targets.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("gtex_dir")
     args = parser.parse_args()
@@ -84,7 +90,7 @@ def main():
     egene_dist_rows = []
 
     tissues = discover_tissues(
-        f"{args.gtex_vcf_dir}/*_pos.vcf", "_pos.vcf", gtex_keywords
+        f"{args.gtex_vcf_dir}/*_pos.vcf", "_pos.vcf", tissue_keywords(args.smtsd)
     )
     for tissue, keyword in tissues:
         if args.verbose:

@@ -12,8 +12,8 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 
 from westminster.gtex import (
     discover_tissues,
-    gtex_keywords,
     match_tissue_targets,
+    tissue_keywords,
 )
 
 """
@@ -59,6 +59,12 @@ def main():
         help="Use the legacy EMS pipeline: pull variant metadata from the "
         "gtex_fine/tissues_susie/{tissue}.tsv tables instead of the VCF INFO.",
     )
+    parser.add_argument(
+        "--smtsd",
+        action="store_true",
+        help="Match one merged per-SMTSD track per tissue, instead of the "
+        "coarse keywords. Requires merged GTEx targets.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("gtex_dir")
     args = parser.parse_args()
@@ -67,7 +73,7 @@ def main():
 
     metrics_rows = []
     tissues = discover_tissues(
-        f"{args.gtex_vcf_dir}/*_pos.vcf", "_pos.vcf", gtex_keywords
+        f"{args.gtex_vcf_dir}/*_pos.vcf", "_pos.vcf", tissue_keywords(args.smtsd)
     )
     for tissue, keyword in tissues:
         if args.verbose:
