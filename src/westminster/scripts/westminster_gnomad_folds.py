@@ -23,7 +23,7 @@ import slurmrunner
 from gcprunner.argparse_helpers import add_argparse_group
 from baskerville_torch import utils
 from baskerville_torch.scripts.hound_snp_folds import snp_folds
-from westminster.multi import relocate_gcp_scores
+from westminster.multi import gcp_mirror_dir, relocate_gcp_scores
 
 """
 westminster_gnomad_folds
@@ -307,9 +307,10 @@ def main():
 
         # On Slurm we embed scores in the models dir; on GCP snp_folds rejects
         # --embed (read-only model mount) and fetches to a flat local mirror,
-        # which we then relocate into the same embed layout below. snp_folds
-        # also rewrites local paths on args (models_dir, etc.), so each scoring
-        # call gets a fresh copy to keep the originals intact across both calls.
+        # one per models dir, which we then relocate into the same embed layout
+        # below. snp_folds also rewrites local paths on args (models_dir, etc.),
+        # so each scoring call gets a fresh copy to keep the originals intact
+        # across both calls.
         gcp_backend = getattr(args, "backend", None) == "gcp"
         local_models_dir = args.models_dir
         fold_crosses = [
@@ -323,6 +324,9 @@ def main():
             )
             call_args.out_dir = f"{gnomad_out_dir}/{kind}"
             call_args.embed = not gcp_backend
+            call_args.gcp_fetch_output = gcp_mirror_dir(
+                local_models_dir, call_args.out_dir
+            )
             snp_folds(call_args)
             if gcp_backend:
                 relocate_gcp_scores(call_args.out_dir, local_models_dir, fold_crosses)
