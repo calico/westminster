@@ -25,7 +25,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "black~=26.0",
     "pytest~=9.0",
     "ruff~=0.15",
     "slurmrunner",
