@@ -13,44 +13,27 @@
 # limitations under the License.
 # =========================================================================
 
+import errno
 import h5py
 import os
+from pathlib import Path
 import shutil
 import numpy as np
 
 
 def gcp_mirror_dir(models_dir: str, out_dir: str) -> str:
-    """Local staging dir for GCP-fetched scores, one per models_dir.
-
-    Keyed on ``models_dir`` so concurrent configs scored from one working
-    directory cannot fetch into each other's mirror, and placed inside it so the
-    subsequent move is a same-filesystem rename rather than a copy.
-
-    Args:
-        models_dir (str): Cross-fold models directory (original local path).
-        out_dir (str): Embed-relative output dir, e.g. ``eqtl/merge``.
-    """
+    """Stage GCP scores inside each models directory for isolated, local moves."""
     return os.path.join(models_dir, ".gcp_fetch", out_dir.lstrip(os.sep))
 
 
 def relocate_gcp_scores(out_dir: str, models_dir: str, fold_crosses: list):
-    """Move GCP-fetched per-fold/ensemble scores into the embed layout.
+    """Move mirrored scores to ``{models_dir}/{sub}/{out_dir}``, then prune empties.
 
-    ``snp_folds(--backend gcp)`` rejects ``--embed`` (the staged models dir is a
-    read-only container mount) and fetches merged results to the flat mirror
-    :func:`gcp_mirror_dir` gives it, at ``{mirror}/{sub}/...``. The downstream
-    split/classify/metrics steps, however, read the embed layout
-    ``{models_dir}/{sub}/{out_dir}/...`` (= what ``--embed`` would have produced
-    under Slurm). This moves the fetched files into place so the rest of the
-    pipeline runs unchanged, then drops the emptied mirror.
-
-    Args:
-        out_dir (str): Embed-relative output dir the caller passed to snp_folds
-            as ``args.out_dir``, e.g. ``eqtl/merge``.
-        models_dir (str): Cross-fold models directory (original local path).
-        fold_crosses (list[str]): Fold identifiers, e.g. ``["f0c0", "f1c0"]``.
+    ``out_dir`` is embed-relative (e.g. ``eqtl/merge``); ``fold_crosses`` lists
+    fold identifiers (e.g. ``f0c0``). The ensemble is always included.
     """
     mirror = gcp_mirror_dir(models_dir, out_dir)
+    cleanup_dirs = []
     for sub in list(fold_crosses) + ["ensemble"]:
         src = os.path.join(mirror, sub)
         if not os.path.isdir(src):
@@ -59,14 +42,20 @@ def relocate_gcp_scores(out_dir: str, models_dir: str, fold_crosses: list):
         os.makedirs(dst, exist_ok=True)
         for name in os.listdir(src):
             shutil.move(os.path.join(src, name), os.path.join(dst, name))
+        cleanup_dirs.append(Path(src))
 
-    # drop the emptied scaffolding, but leave any concurrent stage's mirror
-    # (which still holds files) standing
-    shutil.rmtree(mirror, ignore_errors=True)
-    fetch_root = os.path.join(models_dir, ".gcp_fetch")
-    for root, _, _ in os.walk(fetch_root, topdown=False):
-        if not os.listdir(root):
+    # Only prune this stage and its ancestors, never sibling stages.
+    fetch_root = Path(models_dir) / ".gcp_fetch"
+    for root in (Path(mirror), *Path(mirror).parents):
+        cleanup_dirs.append(root)
+        if root == fetch_root:
+            break
+    for root in cleanup_dirs:
+        try:
             os.rmdir(root)
+        except OSError as exc:
+            if exc.errno not in (errno.ENOENT, errno.ENOTEMPTY, errno.EEXIST):
+                raise
 
 
 def collect_scores(out_dir: str, num_jobs: int, h5f_name: str = "scores.h5"):

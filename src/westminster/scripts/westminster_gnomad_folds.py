@@ -305,12 +305,8 @@ def main():
         rare_vcf_file = f"{args.gnomad_vcf_dir}/rare{args.variants_label}.vcf"
         common_vcf_file = f"{args.gnomad_vcf_dir}/common{args.variants_label}.vcf"
 
-        # On Slurm we embed scores in the models dir; on GCP snp_folds rejects
-        # --embed (read-only model mount) and fetches to a flat local mirror,
-        # one per models dir, which we then relocate into the same embed layout
-        # below. snp_folds also rewrites local paths on args (models_dir, etc.),
-        # so each scoring call gets a fresh copy to keep the originals intact
-        # across both calls.
+        # GCP models are read-only; fetch per config, then relocate into the embed layout.
+        # Copy args because snp_folds rewrites local paths.
         gcp_backend = getattr(args, "backend", None) == "gcp"
         local_models_dir = args.models_dir
         fold_crosses = [

@@ -305,11 +305,8 @@ def main():
         if not os.path.exists(merge_vcf_file):
             raise FileNotFoundError(merge_vcf_file)
 
-        # On Slurm we embed scores in the models dir; on GCP snp_folds rejects
-        # --embed (read-only model mount) and fetches to a flat local mirror,
-        # one per models dir, which we then relocate into the same embed layout.
-        # snp_folds also rewrites local paths on args (models_dir, etc.), so it
-        # gets a fresh copy to keep the originals intact for the steps below.
+        # GCP models are read-only; fetch per config, then relocate into the embed layout.
+        # Copy args because snp_folds rewrites local paths.
         gcp_backend = getattr(args, "backend", None) == "gcp"
         local_models_dir = args.models_dir
         fold_crosses = [
@@ -473,8 +470,7 @@ def main():
         cmd_metrics += f" > {metrics_out_dir}.out 2> {metrics_out_dir}.err"
         jobs.append(cmd_metrics)
 
-    # metrics is seconds of CPU over an existing scores.h5, so it always runs
-    # locally -- --backend selects the scoring backend only
+    # Metrics are cheap enough to run locally for every backend.
     utils.exec_par(jobs, 3, verbose=True)
 
 
