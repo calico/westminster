@@ -408,7 +408,14 @@ def load_match_attributes(vcf_dir: str, tissue: str, fields):
     classification metric stays paired inside it.
 
     Returns a DataFrame indexed by variant; suitable for df.join(...).
+
+    A tissue the benchmark does not cover returns an empty frame, so it joins as
+    NaN and drops out of any stratification. A `vcf_dir` that is not a directory
+    raises instead: every tissue would take that path, and the caller would get a
+    silently unstratifiable pool rather than a bad path.
     """
+    if not os.path.isdir(vcf_dir):
+        raise FileNotFoundError(f"QTL benchmark directory not found: {vcf_dir}")
     pos_vcf = f"{vcf_dir}/{tissue}_pos.vcf"
     matches_path = f"{vcf_dir}/{tissue}_matches.tsv"
     if not os.path.isfile(pos_vcf) or not os.path.isfile(matches_path):
