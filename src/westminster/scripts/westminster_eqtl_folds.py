@@ -509,7 +509,8 @@ def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
     merge_dir = f"{it_out_dir}/merge"
     targets_cov_file = f"{merge_dir}/targets_cov.txt"
     targets_covgene_file = f"{merge_dir}/targets_covgene.txt"
-    targets_gene_file = f"{merge_dir}/targets_gene.txt"
+    # gene/covgene are written only by the stats that need them
+    targets_opt = ["targets_gene.txt", "targets_covgene.txt"]
     merge_h5_file = f"{merge_dir}/scores.h5"
 
     if not os.path.exists(merge_h5_file):
@@ -577,8 +578,9 @@ def split_scores(it_out_dir: str, posneg: str, vcf_dir: str, snp_stats):
                 shutil.copyfile(
                     targets_covgene_file, f"{tissue_dir}/targets_covgene.txt"
                 )
-            if os.path.exists(targets_gene_file):
-                shutil.copyfile(targets_gene_file, f"{tissue_dir}/targets_gene.txt")
+            for tname in targets_opt:
+                if os.path.exists(f"{merge_dir}/{tname}"):
+                    shutil.copyfile(f"{merge_dir}/{tname}", f"{tissue_dir}/{tname}")
 
             out_h5_path = f"{tissue_dir}/scores.h5"
             with h5py.File(out_h5_path, "w") as out_h5:
