@@ -239,8 +239,9 @@ def main():
     gtex_group.add_argument(
         "--merge_dir",
         default=None,
-        help="Link the merge scores from this sibling output directory instead of "
-        "scoring, for a variant set it covers (e.g. -o eqtl_gold --merge_dir eqtl)",
+        help="Reuse covering fold scores from this sibling output directory and "
+        "rebuild the selected folds' ensemble; use a new -o when changing sources "
+        "or folds (e.g. -o eqtl_gold --merge_dir eqtl)",
     )
     gtex_group.add_argument(
         "--skip_boost",

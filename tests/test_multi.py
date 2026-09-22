@@ -3,8 +3,95 @@ import os
 from pathlib import Path
 
 import pytest
+import h5py
+import numpy as np
 
-from westminster.multi import gcp_mirror_dir, relocate_gcp_scores
+from westminster.multi import gcp_mirror_dir, link_merge_scores, relocate_gcp_scores
+
+
+def stage_merge(models_dir, out_dir, folds):
+    pytest.importorskip("baskerville_torch.scripts.hound_snp_folds")
+    for i, sub in enumerate([*folds, "ensemble"]):
+        merge = models_dir / sub / out_dir / "merge"
+        merge.mkdir(parents=True)
+        (merge / "targets_cov.txt").write_text("targets")
+        with h5py.File(merge / "scores.h5", "w") as scores:
+            scores["snp"] = np.array([b"rs1"])
+            scores["cov/logSUM"] = np.array([[2 * i]], dtype="float16")
+
+
+def test_link_merge_repeat_preserves_links(tmp_path):
+    stage_merge(tmp_path, "source", ["f0c0"])
+    link_merge_scores(tmp_path, "subset", "source", ["f0c0"])
+    link = tmp_path / "f0c0/subset/merge"
+    inode = link.lstat().st_ino
+
+    link_merge_scores(tmp_path, "subset", "source", ["f0c0"])
+
+    assert link.lstat().st_ino == inode
+    assert not os.path.isabs(os.readlink(link))
+    with h5py.File(link / "scores.h5") as scores:
+        assert scores["cov/logSUM"][0, 0] == 0
+
+
+def test_link_merge_rejects_changed_source_before_any_links(tmp_path):
+    for source in ["source_a", "source_b"]:
+        stage_merge(tmp_path, source, ["f0c0"])
+    link_merge_scores(tmp_path, "subset", "source_a", ["f0c0"])
+    # A missing fold link must not be created before checking the ensemble.
+    fold_link = tmp_path / "f0c0/subset/merge"
+    fold_link.unlink()
+    ensemble_link = tmp_path / "ensemble/subset/merge"
+    metrics = ensemble_link.parent / "metrics.tsv"
+    metrics.write_text("source_a metrics")
+
+    with pytest.raises(FileExistsError, match="new output directory"):
+        link_merge_scores(tmp_path, "subset", "source_b", ["f0c0"])
+
+    assert not fold_link.exists()
+    with h5py.File(ensemble_link / "scores.h5") as scores:
+        assert scores["cov/logSUM"][0, 0] == 0
+    assert metrics.read_text() == "source_a metrics"
+
+
+@pytest.mark.parametrize("folds, expected", [(["f0c0"], 0), (["f0c0", "f1c0"], 1)])
+def test_link_merge_ensembles_only_requested_folds(tmp_path, folds, expected):
+    stage_merge(tmp_path, "source", ["f0c0", "f1c0", "f0c1"])
+    source_ensemble = tmp_path / "ensemble/source/merge/scores.h5"
+    original = source_ensemble.read_bytes()
+
+    link_merge_scores(tmp_path, "subset", "source", folds)
+
+    ensemble = tmp_path / "ensemble/subset/merge"
+    assert not ensemble.is_symlink()
+    with h5py.File(ensemble / "scores.h5") as scores:
+        assert scores["cov/logSUM"][0, 0] == expected
+        assert scores["snp"][0] == b"rs1"
+    assert (ensemble / "targets_cov.txt").read_text() == "targets"
+    assert source_ensemble.read_bytes() == original
+
+
+def test_link_merge_rejects_changed_folds(tmp_path):
+    stage_merge(tmp_path, "source", ["f0c0", "f1c0"])
+    link_merge_scores(tmp_path, "subset", "source", ["f0c0"])
+
+    with pytest.raises(FileExistsError, match="new output directory"):
+        link_merge_scores(tmp_path, "subset", "source", ["f0c0", "f1c0"])
+
+    assert not (tmp_path / "f1c0/subset").exists()
+
+
+def test_link_merge_rejects_unverified_existing_ensemble(tmp_path):
+    stage_merge(tmp_path, "source", ["f0c0"])
+    ensemble = tmp_path / "ensemble/subset/merge"
+    ensemble.parent.mkdir(parents=True)
+    ensemble.symlink_to("../source/merge")
+
+    with pytest.raises(FileExistsError, match="new output directory"):
+        link_merge_scores(tmp_path, "subset", "source", ["f0c0"])
+
+    assert not (tmp_path / "f0c0/subset").exists()
+    assert ensemble.is_symlink()
 
 
 def stage_mirror(models_dir: str, out_dir: str, fold_crosses, tag: str):
