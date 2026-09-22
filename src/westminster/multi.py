@@ -58,6 +58,33 @@ def relocate_gcp_scores(out_dir: str, models_dir: str, fold_crosses: list):
                 raise
 
 
+def link_merge_scores(
+    models_dir: str, out_dir: str, merge_dir: str, fold_crosses: list
+):
+    """Point each fold's ``{out_dir}/merge`` at an existing run's merge scores.
+
+    Valid whenever ``merge_dir``'s variant set covers ``out_dir``'s: the split
+    selects each tissue's rows by snp_id and raises on one it cannot find, so a
+    set that is not a superset fails there rather than truncating silently.
+    ``fold_crosses`` lists fold identifiers (e.g. ``f0c0``); the ensemble is
+    always included.
+    """
+    for sub in list(fold_crosses) + ["ensemble"]:
+        src = os.path.join(models_dir, sub, merge_dir, "merge")
+        if not os.path.isfile(os.path.join(src, "scores.h5")):
+            raise FileNotFoundError(f"expected merge scores at {src}/scores.h5")
+        dst_dir = os.path.join(models_dir, sub, out_dir)
+        os.makedirs(dst_dir, exist_ok=True)
+        dst = os.path.join(dst_dir, "merge")
+        if os.path.islink(dst):
+            os.unlink(dst)
+        elif os.path.exists(dst):
+            raise FileExistsError(f"{dst} exists and is not a link")
+        rel = os.path.relpath(src, dst_dir)
+        os.symlink(rel, dst)
+        print(f"{dst} -> {rel}")
+
+
 def collect_scores(out_dir: str, num_jobs: int, h5f_name: str = "scores.h5"):
     """Collect parallel SAD jobs' output into one HDF5.
 

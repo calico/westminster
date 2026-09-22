@@ -27,7 +27,7 @@ import slurmrunner
 from gcprunner.argparse_helpers import add_argparse_group
 from baskerville_torch import utils
 from baskerville_torch.scripts.hound_snp_folds import snp_folds
-from westminster.multi import gcp_mirror_dir, relocate_gcp_scores
+from westminster.multi import gcp_mirror_dir, link_merge_scores, relocate_gcp_scores
 
 """
 westminster_sqtl_folds
@@ -237,6 +237,12 @@ def main():
         help="Skip SNP scoring and splitting; only run classifiers and metrics analysis",
     )
     gtex_group.add_argument(
+        "--merge_dir",
+        default=None,
+        help="Link the merge scores from this sibling output directory instead of "
+        "scoring, for a variant set it covers (e.g. -o eqtl_gold --merge_dir eqtl)",
+    )
+    gtex_group.add_argument(
         "--skip_boost",
         default=False,
         action="store_true",
@@ -297,30 +303,38 @@ def main():
         ################################################################
         # score SNPs
 
-        # Combined pos+neg variants, pre-merged in the data dir. Scoring all
-        # variants in one snp_folds call lets every scoring job queue in a
-        # single multi_run (vs. one blocking wave per pos/neg file); they are
-        # split back per tissue/posneg below by snp_id.
-        merge_vcf_file = f"{args.gtex_vcf_dir}/merge.vcf"
-        if not os.path.exists(merge_vcf_file):
-            raise FileNotFoundError(merge_vcf_file)
-
-        # GCP models are read-only; fetch per config, then relocate into the embed layout.
-        # Copy args because snp_folds rewrites local paths.
-        gcp_backend = getattr(args, "backend", None) == "gcp"
-        local_models_dir = args.models_dir
         fold_crosses = [
             f"f{fi}c{ci}" for ci in range(args.crosses) for fi in fold_index
         ]
 
-        call_args = copy.copy(args)
-        call_args.vcf_file = merge_vcf_file
-        call_args.out_dir = f"{gtex_out_dir}/merge"
-        call_args.embed = not gcp_backend
-        call_args.gcp_fetch_output = gcp_mirror_dir(local_models_dir, call_args.out_dir)
-        snp_folds(call_args)
-        if gcp_backend:
-            relocate_gcp_scores(call_args.out_dir, local_models_dir, fold_crosses)
+        if args.merge_dir is not None:
+            link_merge_scores(
+                args.models_dir, gtex_out_dir, args.merge_dir, fold_crosses
+            )
+        else:
+            # Combined pos+neg variants, pre-merged in the data dir. Scoring all
+            # variants in one snp_folds call lets every scoring job queue in a
+            # single multi_run (vs. one blocking wave per pos/neg file); they are
+            # split back per tissue/posneg below by snp_id.
+            merge_vcf_file = f"{args.gtex_vcf_dir}/merge.vcf"
+            if not os.path.exists(merge_vcf_file):
+                raise FileNotFoundError(merge_vcf_file)
+
+            # GCP models are read-only; fetch per config, then relocate into the
+            # embed layout. Copy args because snp_folds rewrites local paths.
+            gcp_backend = getattr(args, "backend", None) == "gcp"
+            local_models_dir = args.models_dir
+
+            call_args = copy.copy(args)
+            call_args.vcf_file = merge_vcf_file
+            call_args.out_dir = f"{gtex_out_dir}/merge"
+            call_args.embed = not gcp_backend
+            call_args.gcp_fetch_output = gcp_mirror_dir(
+                local_models_dir, call_args.out_dir
+            )
+            snp_folds(call_args)
+            if gcp_backend:
+                relocate_gcp_scores(call_args.out_dir, local_models_dir, fold_crosses)
 
         ################################################################
         # split study/tissue variants
