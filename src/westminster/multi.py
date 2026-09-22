@@ -15,6 +15,7 @@
 
 import errno
 import h5py
+import json
 import os
 from pathlib import Path
 import shutil
@@ -56,6 +57,59 @@ def relocate_gcp_scores(out_dir: str, models_dir: str, fold_crosses: list):
         except OSError as exc:
             if exc.errno not in (errno.ENOENT, errno.ENOTEMPTY, errno.EEXIST):
                 raise
+
+
+def link_merge_scores(
+    models_dir: str, out_dir: str, merge_dir: str, fold_crosses: list
+):
+    """Link covering fold scores and rebuild the requested folds' ensemble.
+
+    Tissue splitting checks variant coverage. Source paths and fold selection
+    must stay fixed on reruns; use a new output directory to change them.
+    """
+    from baskerville_torch.scripts.hound_snp_folds import ensemble_scores
+
+    if not fold_crosses:
+        raise ValueError("At least one fold is required")
+
+    sources = []
+    links = []
+    for sub in fold_crosses:
+        src = os.path.join(models_dir, sub, merge_dir, "merge")
+        if not os.path.isfile(os.path.join(src, "scores.h5")):
+            raise FileNotFoundError(f"expected merge scores at {src}/scores.h5")
+        sources.append(os.path.realpath(src))
+        dst_dir = os.path.join(models_dir, sub, out_dir)
+        dst = os.path.join(dst_dir, "merge")
+        if os.path.islink(dst):
+            if os.path.realpath(dst) != os.path.realpath(src):
+                raise FileExistsError(
+                    f"{dst} points to a different source; use a new output directory"
+                )
+        elif os.path.exists(dst):
+            raise FileExistsError(f"{dst} exists and is not a link")
+        else:
+            links.append((src, dst_dir, dst))
+
+    ensemble_dir = Path(models_dir) / "ensemble" / out_dir / "merge"
+    sources_file = ensemble_dir / "sources.json"
+    if ensemble_dir.is_symlink() or (
+        ensemble_dir.exists()
+        and (not sources_file.is_file() or json.loads(sources_file.read_text()) != sources)
+    ):
+        raise FileExistsError(
+            f"{ensemble_dir} has different or unknown sources; use a new output directory"
+        )
+
+    for src, dst_dir, dst in links:
+        os.makedirs(dst_dir, exist_ok=True)
+        rel = os.path.relpath(src, dst_dir)
+        os.symlink(rel, dst)
+        print(f"{dst} -> {rel}")
+
+    ensemble_dir.mkdir(parents=True, exist_ok=True)
+    sources_file.write_text(json.dumps(sources) + "\n")
+    ensemble_scores(str(ensemble_dir), sources)
 
 
 def collect_scores(out_dir: str, num_jobs: int, h5f_name: str = "scores.h5"):
