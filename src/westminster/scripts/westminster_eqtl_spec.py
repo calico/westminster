@@ -184,9 +184,12 @@ def tissue_map(native: bool = False):
     Native resolution requires tissue-specific tracks; the lowercase tissue
     label is what match_tissue_targets looks for in a target description.
     Only matched tissues are scored. Track labels alone do not establish
-    tissue specificity, so callers must choose the appropriate axis.
+    tissue specificity, so callers must choose the appropriate axis. A tuple
+    keyword's first member names its group, so the three arteries share one.
     """
-    return {t: t.lower() for t in gtex_keywords} if native else dict(gtex_keywords)
+    if native:
+        return {t: t.lower() for t in gtex_keywords}
+    return {t: kw if isinstance(kw, str) else kw[0] for t, kw in gtex_keywords.items()}
 
 
 def resolve_groups(

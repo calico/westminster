@@ -13,9 +13,9 @@ txrev_keywords = {
     "GTEx_txrev_adipose_subcutaneous": "adipose",
     "GTEx_txrev_adipose_visceral": "adipose",
     "GTEx_txrev_adrenal_gland": "adrenal_gland",
-    "GTEx_txrev_artery_aorta": "heart",
-    "GTEx_txrev_artery_coronary": "heart",
-    "GTEx_txrev_artery_tibial": "heart",
+    "GTEx_txrev_artery_aorta": ("blood_vessel", "artery_aorta"),
+    "GTEx_txrev_artery_coronary": ("blood_vessel", "artery_coronary"),
+    "GTEx_txrev_artery_tibial": ("blood_vessel", "artery_tibial"),
     "GTEx_txrev_blood": "blood",
     "GTEx_txrev_brain_amygdala": "brain",
     "GTEx_txrev_brain_anterior_cingulate_cortex": "brain",
@@ -61,13 +61,17 @@ txrev_keywords = {
 }
 
 
+# Coarse keywords, matched against SMTS-described targets (RNA:heart,
+# RNA:blood_vessel, ...). Artery_* is a tuple so one entry serves both target
+# generations: blood_vessel pools the SMTS artery tracks, and artery_* hits the
+# 1:1 track on per-SMTSD merged targets. The first member names the group.
 gtex_keywords = {
     "Adipose_Subcutaneous": "adipose",
     "Adipose_Visceral_Omentum": "adipose",
     "Adrenal_Gland": "adrenal_gland",
-    "Artery_Aorta": "heart",
-    "Artery_Coronary": "heart",
-    "Artery_Tibial": "heart",
+    "Artery_Aorta": ("blood_vessel", "artery_aorta"),
+    "Artery_Coronary": ("blood_vessel", "artery_coronary"),
+    "Artery_Tibial": ("blood_vessel", "artery_tibial"),
     "Bladder": "bladder",
     "Brain_Amygdala": "brain",
     "Brain_Anterior_cingulate_cortex_BA24": "brain",
@@ -203,13 +207,17 @@ def tissue_keywords(smtsd: bool = False, txrev: bool = False):
 
 
 def match_tissue_targets(targets_df, keyword, gene_targets=False, verbose=False):
-    """Return array of target indices matching a GTEx tissue keyword."""
+    """Return array of target indices matching a GTEx tissue keyword.
+
+    A tuple keyword matches a target containing any of its members.
+    """
+    keywords = (keyword,) if isinstance(keyword, str) else keyword
     target_ids = targets_df.identifier.values
     target_labels = targets_df.description.values
     match_tis = []
     for ti, (tid, tlab) in enumerate(zip(target_ids, target_labels)):
         tlab = tlab.lower()
-        if keyword in tlab and ("GTEX" in tid or gene_targets):
+        if any(kw in tlab for kw in keywords) and ("GTEX" in tid or gene_targets):
             if not (keyword == "blood" and "vessel" in tlab):
                 if verbose:
                     print(ti, tid, tlab)
