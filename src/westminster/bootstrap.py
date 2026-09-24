@@ -272,9 +272,10 @@ def _cluster_rows(pools, col, edges, include_nan_bin, kind, cor_col):
     is the one place this path deliberately differs from them.
     """
     pool1, pool2 = pools
-    nb = len(bin_labels(edges, include_nan_bin=include_nan_bin))
+    nb = 1 if col is None else len(bin_labels(edges, include_nan_bin=include_nan_bin))
     signed = kind == "cor"
-    need = ["pred"] + ([] if include_nan_bin else [col]) + ([cor_col] if signed else [])
+    binned = col is not None and not include_nan_bin
+    need = ["pred"] + ([col] if binned else []) + ([cor_col] if signed else [])
     parts = []
     for ti, t in enumerate(pool1):
         d1 = pool1[t]
@@ -285,7 +286,9 @@ def _cluster_rows(pools, col, edges, include_nan_bin, kind, cor_col):
         ok = (d1[need].notna().all(axis=1) & d2[need].notna().all(axis=1)).to_numpy()
         d1, d2 = d1[ok], d2[ok]
         code = (
-            cut_by_abs(d1[col], edges, include_nan_bin)[0]
+            np.zeros(len(d1), np.int64)
+            if col is None
+            else cut_by_abs(d1[col], edges, include_nan_bin)[0]
             .cat.codes.to_numpy()
             .astype(np.int64)
         )
@@ -328,7 +331,8 @@ def cluster_stats(
 
     pools: (pool1, pool2), each dict[tissue -> DataFrame] from `load_qtl_pools`.
     col/edges: the attribute to stratify on and its bin edges, or the category
-        order of an already-categorical column (see `cut_by_abs`).
+        order of an already-categorical column (see `cut_by_abs`). col=None
+        scores every row as one stratum, labeled 'all'.
     kind: 'clf' scores |pred| against the matched negatives, returning AUROC and
         AUPRC; 'cor' scores signed pred against `cor_col` over the positives,
         returning Spearman rho.
@@ -350,7 +354,9 @@ def cluster_stats(
     .attrs['boots'] for a caller wanting percentile CIs.
     """
     agg_fn = {"median": np.nanmedian, "mean": np.nanmean}[agg]
-    bin_order = bin_labels(edges, include_nan_bin=include_nan_bin)
+    bin_order = (
+        ["all"] if col is None else bin_labels(edges, include_nan_bin=include_nan_bin)
+    )
     nb = len(bin_order)
     var, cell, y, s1, s2, c1, c2 = _cluster_rows(
         pools, col, edges, include_nan_bin, kind, cor_col
