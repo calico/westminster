@@ -2,6 +2,7 @@
 
 import shutil
 import subprocess
+import sys
 
 import h5py
 import numpy as np
@@ -16,7 +17,7 @@ westminster_classify.py
 def test_classify():
     num_variants = 256
     out_dir = "tests/data/class_out"
-    shutil.rmtree(out_dir)
+    shutil.rmtree(out_dir, ignore_errors=True)
 
     # simulate and write positive examples
     Xp = np.random.multivariate_normal([0, 0], [[1, 0], [0, 1]], size=num_variants)
@@ -36,9 +37,9 @@ def test_classify():
 
     # run classify
 
-    cmd = "westminster_classify.py %s %s" % (pos_h5f, neg_h5f)
-    cmd += " -o %s --stat SAD" % out_dir
-    subprocess.call(cmd, shell=True)
+    cmd = [sys.executable, "-m", "westminster.scripts.westminster_classify"]
+    cmd += [pos_h5f, neg_h5f, "-o", out_dir, "--stat", "SAD"]
+    subprocess.run(cmd, check=True)
 
     # check auroc
     aurocs = np.load("%s/aurocs.npy" % out_dir)
