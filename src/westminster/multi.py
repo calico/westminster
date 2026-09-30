@@ -67,7 +67,7 @@ def link_merge_scores(
     Tissue splitting checks variant coverage. Source paths and fold selection
     must stay fixed on reruns; use a new output directory to change them.
     """
-    from baskerville_torch.scripts.hound_snp_folds import ensemble_scores
+    from baskerville.scripts.hound_snp_folds import ensemble_scores
 
     if not fold_crosses:
         raise ValueError("At least one fold is required")

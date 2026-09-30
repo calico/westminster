@@ -10,7 +10,7 @@ from westminster.multi import gcp_mirror_dir, link_merge_scores, relocate_gcp_sc
 
 
 def stage_merge(models_dir, out_dir, folds):
-    pytest.importorskip("baskerville_torch.scripts.hound_snp_folds")
+    pytest.importorskip("baskerville.scripts.hound_snp_folds")
     for i, sub in enumerate([*folds, "ensemble"]):
         merge = models_dir / sub / out_dir / "merge"
         merge.mkdir(parents=True)

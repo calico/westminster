@@ -21,8 +21,8 @@ import os
 import slurmrunner
 
 from gcprunner.argparse_helpers import add_argparse_group
-from baskerville_torch import utils
-from baskerville_torch.scripts.hound_snp_folds import snp_folds
+from baskerville import utils
+from baskerville.scripts.hound_snp_folds import snp_folds
 from westminster.multi import gcp_mirror_dir, relocate_gcp_scores
 
 """
@@ -288,7 +288,7 @@ def main():
     gnomad_out_dir = args.out_dir
 
     # split SNP stats and normalize to HDF5 keys
-    # baskerville-torch stores stats with prefix: cov/, covgene/, gene/
+    # baskerville stores stats with prefix: cov/, covgene/, gene/
     # unprefixed stats like "logD2" are stored as "cov/logD2"
     snp_stats = []
     for s in args.snp_stats.split(","):

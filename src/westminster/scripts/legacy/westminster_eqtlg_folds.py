@@ -25,8 +25,8 @@ import numpy as np
 
 import slurmrunner
 
-import baskerville_torch.utils as utils
-from baskerville_torch.scripts.hound_snp_folds import snp_folds
+import baskerville.utils as utils
+from baskerville.scripts.hound_snp_folds import snp_folds
 
 """
 westminster_eqtlg_folds.py

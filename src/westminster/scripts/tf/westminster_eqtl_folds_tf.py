@@ -26,7 +26,7 @@ import pandas as pd
 import shutil
 
 import slurmrunner
-from baskerville_torch import utils
+from baskerville import utils
 
 """
 westminster_eqtl_folds_tf.py
