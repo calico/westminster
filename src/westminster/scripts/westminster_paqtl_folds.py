@@ -25,8 +25,8 @@ import numpy as np
 import slurmrunner
 
 from gcprunner.argparse_helpers import add_argparse_group
-from baskerville_torch import utils
-from baskerville_torch.scripts.hound_snp_folds import snp_folds
+from baskerville import utils
+from baskerville.scripts.hound_snp_folds import snp_folds
 from westminster.multi import gcp_mirror_dir, link_merge_scores, relocate_gcp_scores
 
 """
