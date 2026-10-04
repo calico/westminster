@@ -250,11 +250,11 @@ def main():
         help="Skip westminster_classify classifier stage",
     )
     gtex_group.add_argument(
-        "--smtsd",
+        "--coarse",
         default=False,
         action="store_true",
-        help="Match one merged per-SMTSD track per tissue; writes to "
-        "metrics-{stat}-smtsd, leaving the coarse pass in place",
+        help="Average every GTEx track matching the coarse tissue keyword, "
+        "instead of the 1:1 per-SMTSD track; writes to metrics-{stat}-coarse",
     )
     # GTEx paQTL directory
     gtex_group.add_argument(
@@ -450,8 +450,8 @@ def main():
     ################################################################
     # metrics
 
-    # a --smtsd pass writes beside the coarse one, over the same scores.h5
-    stat_suffix = "-smtsd" if args.smtsd else ""
+    # a --coarse pass writes beside the default one, over the same scores.h5
+    stat_suffix = "-coarse" if args.coarse else ""
 
     jobs = []
     for ci in range(args.crosses):
@@ -463,8 +463,8 @@ def main():
                 metrics_out_dir = f"{it_out_dir}/metrics-{stat_label}"
 
                 cmd_metrics = f"westminster_paqtl_gtex -g {args.gtex_vcf_dir}"
-                if args.smtsd:
-                    cmd_metrics += " --smtsd"
+                if args.coarse:
+                    cmd_metrics += " --coarse"
                 cmd_metrics += f" -o {metrics_out_dir}"
                 cmd_metrics += f" -s {snp_stat}"
                 cmd_metrics += f" {it_out_dir}"
@@ -477,8 +477,8 @@ def main():
         metrics_out_dir = f"{ens_out_dir}/metrics-{stat_label}"
 
         cmd_metrics = f"westminster_paqtl_gtex -g {args.gtex_vcf_dir}"
-        if args.smtsd:
-            cmd_metrics += " --smtsd"
+        if args.coarse:
+            cmd_metrics += " --coarse"
         cmd_metrics += f" -o {metrics_out_dir}"
         cmd_metrics += f" -s {snp_stat}"
         cmd_metrics += f" {ens_out_dir}"
