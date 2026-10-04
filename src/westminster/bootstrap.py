@@ -30,13 +30,19 @@ top of it:
 - `collapse_stats` averages each variant over its tissues first and scores one row
   per variant. Use it when they are not.
 
+`replicate_stats` compares two configs through their training replicates rather
+than their ensembles, adding seed noise to `cluster_stats`' variant noise.
+
 Both read the per-tissue tables `westminster_eqtl_gtex` writes, loaded by
 `westminster.gtex.load_qtl_pools`.
 """
 
+import warnings
+
 import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr, wilcoxon
+from scipy.stats import t as student_t
 
 # One inclusion rule for every per-tissue estimate: a (tissue, bin) cell needs
 # at least this many *positives* to be scored. Counting positives rather than
@@ -53,8 +59,7 @@ from scipy.stats import spearmanr, wilcoxon
 # benchmark's, and prefer `collapse_stats` once you have to.
 MIN_POS = 20
 
-# Resamples for the variant bootstrap. The smallest p it can report is 2/n_boot,
-# so 2000 is what keeps p < 1e-3 attainable.
+# Resamples for the variant bootstrap; the reported p is floored at 1/n_boot.
 N_BOOT = 2000
 
 
@@ -235,7 +240,7 @@ def _gather(order, start, size, drawn):
     return order[off + np.arange(n.sum())]
 
 
-def variant_bootstrap(index, strata, statistic, *, n_boot=N_BOOT, seed=0):
+def variant_bootstrap(index, strata, statistic, *, n_boot=N_BOOT, seed=0, counts=False):
     """Resample variants within strata; evaluate `statistic` on each draw.
 
     index: (order, start, size, code) from `cluster_index`.
@@ -245,17 +250,21 @@ def variant_bootstrap(index, strata, statistic, *, n_boot=N_BOOT, seed=0):
         change the metric for reasons that have nothing to do with the models.
     statistic: row indices -> scalar or array. Both models must be scored inside
         it off the same indices, or the comparison stops being paired.
+    counts: pass integer variant multiplicities instead of expanded row indices.
+        The random draws are identical in either representation.
 
     Returns (point, boots), where `point` is the statistic over every row and
     `boots` stacks the resamples along axis 0.
     """
     order, start, size, _ = index
-    point = np.asarray(statistic(np.arange(int(size.sum()))), dtype=float)
+    full = np.ones(size.size, dtype=np.int64) if counts else np.arange(int(size.sum()))
+    point = np.asarray(statistic(full), dtype=float)
     rng = np.random.default_rng(seed)
     boots = np.empty((n_boot,) + point.shape)
     for k in range(n_boot):
         drawn = np.concatenate([rng.choice(g, g.size, replace=True) for g in strata])
-        boots[k] = statistic(_gather(order, start, size, drawn))
+        sample = np.bincount(drawn, minlength=size.size) if counts else _gather(order, start, size, drawn)
+        boots[k] = statistic(sample)
     return point, boots
 
 
@@ -263,55 +272,189 @@ def variant_bootstrap(index, strata, statistic, *, n_boot=N_BOOT, seed=0):
 # statistic 1: per-tissue cells, aggregated across tissues
 ################################################################################
 def _cluster_rows(pools, col, edges, include_nan_bin, kind, cor_col):
-    """Flatten two aligned pools into parallel arrays, one row per (tissue, variant).
+    """Flatten aligned pools into parallel arrays, one row per (tissue, variant).
 
-    Returns (variant, cell, y, s1, s2, c1, c2), where `cell` codes the
-    (tissue, bin) pair as tissue*n_bins + bin and the trailing pair is None
-    unless kind='cor'. Rows either model scores NaN are dropped from both, so
-    the two arrays stay paired; the per-tissue functions drop per model, which
-    is the one place this path deliberately differs from them.
+    Returns (variant, cell, y, S, C), where `cell` codes the (tissue, bin) pair
+    as tissue*n_bins + bin, S stacks each model's scores (n_models, n_rows), and
+    C the matching `cor_col` values, None unless kind='cor'. Rows any model
+    scores NaN are dropped from all, so the models stay paired; the per-tissue
+    functions drop per model, which is the one place this path deliberately
+    differs from them.
     """
-    pool1, pool2 = pools
     nb = 1 if col is None else len(bin_labels(edges, include_nan_bin=include_nan_bin))
     signed = kind == "cor"
     binned = col is not None and not include_nan_bin
     need = ["pred"] + ([col] if binned else []) + ([cor_col] if signed else [])
     parts = []
-    for ti, t in enumerate(pool1):
-        d1 = pool1[t]
-        d2 = pool2[t].reindex(d1.index)
+    for ti, t in enumerate(pools[0]):
+        d0 = pools[0][t]
+        ds = [p[t].reindex(d0.index) for p in pools]
         if signed:
-            m = (d1["label"] == "pos").to_numpy()
-            d1, d2 = d1[m], d2[m]
-        ok = (d1[need].notna().all(axis=1) & d2[need].notna().all(axis=1)).to_numpy()
-        d1, d2 = d1[ok], d2[ok]
+            m = (d0["label"] == "pos").to_numpy()
+            d0, ds = d0[m], [d[m] for d in ds]
+        ok = np.logical_and.reduce([d[need].notna().all(axis=1).to_numpy() for d in ds])
+        d0, ds = d0[ok], [d[ok] for d in ds]
         code = (
-            np.zeros(len(d1), np.int64)
+            np.zeros(len(d0), np.int64)
             if col is None
-            else cut_by_abs(d1[col], edges, include_nan_bin)[0]
+            else cut_by_abs(d0[col], edges, include_nan_bin)[0]
             .cat.codes.to_numpy()
             .astype(np.int64)
         )
         keep = code >= 0
-
-        def pull(d):
-            return (d["pred"] if signed else d["pred"].abs()).to_numpy()[keep]
-
         parts.append(
             (
-                d1.index.to_numpy()[keep],
+                d0.index.to_numpy()[keep],
                 ti * nb + code[keep],
-                (d1["label"].to_numpy()[keep] == "pos").astype(np.int8),
-                pull(d1),
-                pull(d2),
-                d1[cor_col].to_numpy()[keep] if signed else None,
-                d2[cor_col].to_numpy()[keep] if signed else None,
+                (d0["label"].to_numpy()[keep] == "pos").astype(np.int8),
+                np.stack(
+                    [(d["pred"] if signed else d["pred"].abs()).to_numpy()[keep] for d in ds]
+                ),
+                np.stack([d[cor_col].to_numpy()[keep] for d in ds]) if signed else None,
             )
         )
-    return [
-        None if parts[0][i] is None else np.concatenate([p[i] for p in parts])
-        for i in range(7)
+    variant, cell, y = (np.concatenate([p[i] for p in parts]) for i in range(3))
+    S = np.concatenate([p[3] for p in parts], axis=1)
+    C = np.concatenate([p[4] for p in parts], axis=1) if signed else None
+    return variant, cell, y, S, C
+
+
+def _tie_groups(x):
+    """Fixed ascending score groups, mapped back to original row order."""
+    return np.unique(x, return_inverse=True)[1]
+
+
+def _weighted_ranks(groups, w):
+    """Average ranks of integer-weighted observations, in original row order."""
+    mass = np.bincount(groups, weights=w)
+    return (np.cumsum(mass) - (mass - 1) / 2)[groups]
+
+
+def _prepare_cell(y, S, C):
+    """Prepare fixed tie groups; return metrics(weights) for one tissue/bin."""
+    if C is None:
+        groups = [_tie_groups(-s) for s in S]  # descending classification thresholds
+
+        def metrics(w):
+            pos, neg = w * y, w * (1 - y)
+            n_pos, n_neg = pos.sum(), neg.sum()
+            out = np.full((len(S), 2), np.nan)
+            if n_pos == 0 or n_neg == 0:
+                return out
+            for k, g in enumerate(groups):
+                dp, df = np.bincount(g, weights=pos), np.bincount(g, weights=neg)
+                tp, fp = np.cumsum(dp), np.cumsum(df)
+                precision = np.divide(tp, tp + fp, out=np.zeros_like(tp), where=tp + fp > 0)
+                out[k] = (np.sum(df * (tp - dp / 2)) / (n_pos * n_neg),
+                          np.sum(dp * precision) / n_pos)
+            return out
+    else:
+        groups = [_tie_groups(s) for s in S]
+        shared = all(np.array_equal(c, C[0]) for c in C[1:])
+        targets = [_tie_groups(c) for c in (C[:1] if shared else C)]
+
+        def metrics(w):
+            out = np.full((len(S), 1), np.nan)
+            n = w.sum()
+            if n < 2:
+                return out
+            center = (n + 1) / 2
+            ry = [_weighted_ranks(g, w) - center for g in targets]
+            vy = [w @ (r * r) for r in ry]
+            for k, g in enumerate(groups):
+                rx = _weighted_ranks(g, w) - center
+                j = 0 if shared else k
+                denom = np.sqrt((w @ (rx * rx)) * vy[j])
+                if denom:
+                    out[k, 0] = (w * rx) @ ry[j] / denom
+            return out
+    return metrics
+
+
+def _cluster_setup(pools, col, edges, include_nan_bin, kind, cor_col, min_n, *, counts=False):
+    """Everything a per-tissue-cell bootstrap needs before it draws.
+
+    Returns (index, strata, cells, score): the variant grouping and strata for
+    `variant_bootstrap`, the (tissue, bin) cell codes passing `min_n` on the
+    full data, and score(rows) -> (n_models, n_metrics, n_cells) holding every
+    model's metric in every cell of a resample — AUROC and AUPRC for kind='clf',
+    Spearman rho for kind='cor'. A cell a resample leaves single-class or
+    constant scores NaN.
+    With counts=True, score accepts variant multiplicities instead of row indices.
+    """
+    nb = 1 if col is None else len(bin_labels(edges, include_nan_bin=include_nan_bin))
+    var, cell, y, S, C = _cluster_rows(pools, col, edges, include_nan_bin, kind, cor_col)
+    index = cluster_index(var)
+    vcode = index[3]
+    nv = index[2].size
+
+    # each variant carries one class and one bin, read off its first row
+    vpos = np.zeros(nv, bool)
+    vpos[vcode[y == 1]] = True
+    vbin = np.empty(nv, np.int64)
+    vbin[vcode[::-1]] = (cell % nb)[::-1]
+    strata = [
+        g
+        for b in range(nb)
+        for g in (
+            np.flatnonzero((vbin == b) & vpos),
+            np.flatnonzero((vbin == b) & ~vpos),
+        )
+        if g.size
     ]
+
+    # (tissue, bin) cells scored on the full data, reused by every resample
+    n_row = np.bincount(cell)
+    n_pos = np.bincount(cell[y == 1], minlength=n_row.size)
+    cells = np.flatnonzero(
+        (n_pos >= min_n) & (n_row - n_pos >= min_n) if kind == "clf" else n_row >= min_n
+    )
+    n_met = 2 if kind == "clf" else 1
+
+    order = np.argsort(cell, kind="stable")
+    lo = np.searchsorted(cell[order], cells, "left")
+    hi = np.searchsorted(cell[order], cells, "right")
+    prepared = []
+    for i0, i1 in zip(lo, hi):
+        r = order[i0:i1]
+        prepared.append((r, _prepare_cell(y[r], S[:, r], C[:, r] if C is not None else None)))
+
+    def score(sample):
+        w = sample[vcode] if counts else np.bincount(sample, minlength=cell.size)
+        out = np.full((len(S), n_met, cells.size), np.nan)
+        for j, (r, metrics) in enumerate(prepared):
+            out[:, :, j] = metrics(w[r])
+        return out
+
+    return index, strata, cells, score
+
+
+def _bin_agg(x, cell_bin, nb, agg):
+    """Aggregate x (..., n_cells) over the cells of each bin -> (..., nb).
+
+    NaN cells drop out; a bin with none finite aggregates to NaN.
+    """
+    fn = {"median": np.nanmedian, "mean": np.nanmean}[agg]
+    out = np.full(x.shape[:-1] + (nb,), np.nan)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN bins
+        for b in range(nb):
+            sel = cell_bin == b
+            if sel.any():
+                out[..., b] = fn(x[..., sel], axis=-1)
+    return out
+
+
+def _stats_frame(out, metrics, bin_order, kind):
+    """{column: (n_metrics, n_bins) array} -> DataFrame over (bin, metric) or bin."""
+    keys = [(b, m) if kind == "clf" else b for m in metrics for b in bin_order]
+    res = pd.DataFrame({k: np.asarray(v).ravel() for k, v in out.items()}, index=keys)
+    res.index = (
+        pd.MultiIndex.from_tuples(keys, names=["bin", "metric"])
+        if kind == "clf"
+        else pd.Index(keys, name="bin")
+    )
+    return res
 
 
 def cluster_stats(
@@ -353,85 +496,147 @@ def cluster_stats(
     kind='clf' and by 'bin' when kind='cor', with the raw draws on
     .attrs['boots'] for a caller wanting percentile CIs.
     """
-    agg_fn = {"median": np.nanmedian, "mean": np.nanmean}[agg]
     bin_order = (
         ["all"] if col is None else bin_labels(edges, include_nan_bin=include_nan_bin)
     )
     nb = len(bin_order)
-    var, cell, y, s1, s2, c1, c2 = _cluster_rows(
-        pools, col, edges, include_nan_bin, kind, cor_col
-    )
     metrics = ("AUROC", "AUPRC") if kind == "clf" else ("rho",)
-
-    index = cluster_index(var)
-    order, start, size, vcode = index
-    nv = size.size
-
-    # each variant carries one class and one bin, read off its first row
-    vpos = np.zeros(nv, bool)
-    vpos[vcode[y == 1]] = True
-    vbin = np.empty(nv, np.int64)
-    vbin[vcode[::-1]] = (cell % nb)[::-1]
-    strata = [
-        g
-        for b in range(nb)
-        for g in (
-            np.flatnonzero((vbin == b) & vpos),
-            np.flatnonzero((vbin == b) & ~vpos),
-        )
-        if g.size
-    ]
-
-    # (tissue, bin) cells scored on the full data, reused by every resample
-    n_row = np.bincount(cell)
-    n_pos = np.bincount(cell[y == 1], minlength=n_row.size)
-    cells = np.flatnonzero(
-        (n_pos >= min_n) & (n_row - n_pos >= min_n) if kind == "clf" else n_row >= min_n
+    index, strata, cells, score = _cluster_setup(
+        pools, col, edges, include_nan_bin, kind, cor_col, min_n, counts=True
     )
 
-    def bin_aggregates(idx):
-        c = cell[idx]
-        o = np.argsort(c, kind="stable")
-        c, idx = c[o], idx[o]
-        lo = np.searchsorted(c, cells, "left")
-        hi = np.searchsorted(c, cells, "right")
-        acc = [[[] for _ in range(nb)] for _ in metrics]
-        for c0, i0, i1 in zip(cells, lo, hi):
-            r = idx[i0:i1]
-            b = c0 % nb
-            if kind == "clf":
-                yy = y[r]
-                m1, m2 = clf_metrics(yy, s1[r]), clf_metrics(yy, s2[r])
-                for mi in (0, 1):
-                    acc[mi][b].append(m2[mi] - m1[mi])
-            else:
-                acc[0][b].append(spearman(s2[r], c2[r]) - spearman(s1[r], c1[r]))
-        return np.array(
-            [
-                [agg_fn(v) if np.any(np.isfinite(v)) else np.nan for v in row]
-                for row in acc
-            ]
-        )
+    def statistic(idx):
+        m = score(idx)
+        return _bin_agg(m[1] - m[0], cells % nb, nb, agg)
 
-    point, boots = variant_bootstrap(
-        index, strata, bin_aggregates, n_boot=n_boot, seed=seed
+    point, boots = variant_bootstrap(index, strata, statistic, n_boot=n_boot, seed=seed, counts=True)
+    res = _stats_frame(
+        {"delta": point, "p": boot_pvalue(boots, n_boot)}, metrics, bin_order, kind
     )
-    p = boot_pvalue(boots, n_boot)
-
-    out, draws = {}, {}
-    for mi, met in enumerate(metrics):
-        for bi, b in enumerate(bin_order):
-            key = (b, met) if kind == "clf" else b
-            out[key] = (point[mi, bi], p[mi, bi])
-            draws[key] = boots[:, mi, bi]
-    res = pd.DataFrame(out, index=["delta", "p"]).T
-    res.index = (
-        pd.MultiIndex.from_tuples(res.index, names=["bin", "metric"])
-        if kind == "clf"
-        else pd.Index(list(res.index), name="bin")
-    )
-    res.attrs["boots"] = draws
+    res.attrs["boots"] = {
+        (b, met) if kind == "clf" else b: boots[:, mi, bi]
+        for mi, met in enumerate(metrics)
+        for bi, b in enumerate(bin_order)
+    }
     return res
+
+
+def replicate_test(point, boots, n1):
+    """The `replicate_stats` test on per-replicate values already bootstrapped.
+
+    point: (n_reps, ...) per-replicate values on the full data, config 1's
+        n1 replicates first; boots: (n_boot, n_reps, ...) the same per draw.
+    Returns {column: array over the trailing axes} for the columns
+    `replicate_stats` reports. Split out so one bootstrap of every replicate can
+    serve many assignments of replicates to configs, as a calibration check does.
+    """
+    a, b = point[:n1], point[n1:]
+    n2 = len(b)
+    delta = b.mean(0) - a.mean(0)
+
+    def interplay(x):
+        # replicate x variant variance in a config's replicate mean, read off how
+        # its replicates' deviations from that mean move across draws
+        if x.shape[1] < 2:
+            return 0.0
+        d = x - x.mean(1, keepdims=True)
+        return np.nanvar(d, axis=0, ddof=1).mean(0) / (x.shape[1] - 1)
+
+    with np.errstate(invalid="ignore", divide="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # n < 2: var undefined
+        var_boot = np.nanvar(boots[:, n1:].mean(1) - boots[:, :n1].mean(1), axis=0, ddof=1)
+        var_v = np.maximum(var_boot - interplay(boots[:, :n1]) - interplay(boots[:, n1:]), 0)
+        v1, v2 = a.var(0, ddof=1) / n1, b.var(0, ddof=1) / n2
+        var_s = v1 + v2
+        se = np.sqrt(var_v + var_s)
+        df = np.where(
+            var_s > 0, (var_v + var_s) ** 2 / (v1**2 / (n1 - 1) + v2**2 / (n2 - 1)), np.inf
+        )
+        t_abs = np.where(se > 0, np.abs(delta) / se, np.where(delta == 0, 0.0, np.inf))
+    unmeasured = np.isnan(var_s)
+    return {
+        "m1": a.mean(0),
+        "m2": b.mean(0),
+        "delta": delta,
+        "se_variant": np.sqrt(var_v),
+        "se_seed": np.sqrt(var_s),
+        "df": np.where(unmeasured, np.nan, df),
+        "p": np.where(unmeasured, np.nan, 2 * student_t.sf(t_abs, df)),
+    }
+
+
+def replicate_stats(
+    reps,
+    col,
+    edges,
+    *,
+    kind="clf",
+    cor_col="coef",
+    include_nan_bin=False,
+    min_n=MIN_POS,
+    agg="median",
+    n_boot=500,
+    seed=0,
+):
+    """Compare two configs by their training replicates, under variant and seed noise.
+
+    reps: (reps1, reps2), each a list of one config's replicate pools
+        (dict[tissue -> DataFrame] from `load_qtl_pools`). The lists may differ
+        in length; replicates are unpaired across configs.
+    col/edges/kind/cor_col/include_nan_bin/min_n/agg: as `cluster_stats`.
+
+    Each replicate's metric is its per-tissue values aggregated across tissues
+    (`agg`), and each config's is the mean over its replicates, so a config
+    with more replicates gains no ensembling advantage. On the full data and
+    each draw, cells undefined for any replicate are excluded from all replicates.
+    `delta` (config 2 - config 1) carries two independent errors:
+
+    - seed noise: s1^2/n1 + s2^2/n2 over the replicates on the full data, as in
+      Welch's t. Replicates differ in which variants they get right, so this
+      already holds the replicate x variant interplay.
+    - variant noise in the config effect: the spread of `delta` across a
+      `cluster_stats`-style resample of variants, every replicate of both
+      configs scored on each draw, less the interplay already counted above —
+      read off each config's replicate deviations across draws (a
+      variance-components split, floored at zero). Only its standard error is
+      used, so n_boot need not reach the tails.
+
+    p is a t-test of delta against the summed variance, with Welch-Satterthwaite
+    degrees of freedom from the seed term (the variant term's are effectively
+    infinite), so few replicates widen the test rather than being resampled.
+    A config with one replicate leaves seed noise and interplay unmeasured:
+    se_seed, df and p are NaN.
+
+    Returns (stats, (vals1, vals2)): stats a DataFrame of ['m1', 'm2', 'delta',
+    'se_variant', 'se_seed', 'df', 'p'] indexed as `cluster_stats`; vals the
+    per-replicate values, one DataFrame per config with a column per replicate.
+    """
+    reps1, reps2 = reps
+    n1 = len(reps1)
+    bin_order = (
+        ["all"] if col is None else bin_labels(edges, include_nan_bin=include_nan_bin)
+    )
+    nb = len(bin_order)
+    metrics = ("AUROC", "AUPRC") if kind == "clf" else ("rho",)
+    index, strata, cells, score = _cluster_setup(
+        [*reps1, *reps2], col, edges, include_nan_bin, kind, cor_col, min_n, counts=True
+    )
+
+    def statistic(idx):
+        values = score(idx)
+        values = np.where(np.isfinite(values).all(axis=0), values, np.nan)
+        return _bin_agg(values, cells % nb, nb, agg)  # (n1 + n2, metrics, bins)
+
+    point, boots = variant_bootstrap(index, strata, statistic, n_boot=n_boot, seed=seed, counts=True)
+    a, b = point[:n1], point[n1:]
+    res = _stats_frame(replicate_test(point, boots, n1), metrics, bin_order, kind)
+    vals = tuple(
+        pd.DataFrame(
+            {r: _stats_frame({"v": x[r]}, metrics, bin_order, kind)["v"] for r in range(len(x))}
+        )
+        for x in (a, b)
+    )
+    return res, vals
 
 
 ################################################################################

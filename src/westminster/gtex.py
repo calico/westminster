@@ -471,12 +471,13 @@ def load_qtl_pools(vcf_dir: str, fields, *metric_dirs):
     via `load_match_attributes` (and broadcast to matched negatives).
     """
     tissues = sorted(set.intersection(*[_tissues_in_dir(d) for d in metric_dirs]))
+    attributes = {t: load_match_attributes(vcf_dir, t, fields) for t in tissues}
     pools = []
     for d in metric_dirs:
         pool = {}
         for t in tissues:
             df = pd.read_csv(f"{d}/{t}.tsv", sep="\t", index_col=0)
-            pool[t] = df.join(load_match_attributes(vcf_dir, t, fields), on="variant")
+            pool[t] = df.join(attributes[t], on="variant")
         pools.append(pool)
     return tissues, pools
 

@@ -49,3 +49,24 @@ def test_default_prefers_smtsd():
     assert match(OLD, "Artery_Tibial") == [6, 7, 8]
     assert match(OLD, "brain_amygdala") == [9, 10, 11]
 
+
+def test_pool_annotations_loaded_once_per_shared_tissue(tmp_path, monkeypatch):
+    from westminster import gtex
+
+    dirs = [tmp_path / str(i) for i in range(3)]
+    calls = []
+    def attributes(vcf_dir, tissue, fields):
+        calls.append(tissue)
+        return pd.DataFrame({'REGION': ['TSS']}, index=pd.Index(['v1'], name='variant'))
+    monkeypatch.setattr(gtex, 'load_match_attributes', attributes)
+    for i, directory in enumerate(dirs):
+        directory.mkdir()
+        for tissue in ['A', 'B', f'only_{i}']:
+            pd.DataFrame({'variant': ['v1'], 'pred': [i]}).set_index('variant').to_csv(
+                directory / f'{tissue}.tsv', sep='\t')
+    tissues, pools = gtex.load_qtl_pools('unused', ['REGION'], *dirs)
+    assert tissues == ['A', 'B']
+    assert calls == ['A', 'B']
+    for i, pool in enumerate(pools):
+        assert pool['A'].loc['v1', 'pred'] == i
+        assert pool['B'].loc['v1', 'REGION'] == 'TSS'

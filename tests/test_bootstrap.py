@@ -13,6 +13,7 @@ from westminster.bootstrap import (
     cluster_stats,
     collapse_stats,
     one_tissue_pick,
+    replicate_stats,
     spearman,
     variant_bootstrap,
 )
@@ -194,6 +195,80 @@ def test_cluster_stats_agg_mean_differs_from_median():
 
 
 ################################################################################
+# replicate-level comparison
+################################################################################
+def make_reps(n, edge=0.0, seed_sd=0.05, seed=0):
+    """n replicates of one config: a shared pool plus per-replicate seed noise."""
+    base = make_pools(edge=edge)[1]
+    rng = np.random.default_rng(seed)
+    reps = []
+    for _ in range(n):
+        shift = rng.normal(0, seed_sd, len(next(iter(base.values()))))
+        reps.append({t: df.assign(pred=df.pred + shift) for t, df in base.items()})
+    return reps
+
+
+def test_replicate_stats_identical_configs():
+    reps = make_reps(3)
+    res, _ = replicate_stats((reps, reps), "REGION", ["TSS", "CDS"], min_n=5, n_boot=50)
+    assert res["delta"].abs().max() == 0
+    assert (res["p"] == 1).all()
+
+
+def test_replicate_stats_detects_a_real_edge_with_unequal_replicates():
+    reps1, reps2 = make_reps(4, seed=1), make_reps(2, edge=0.8, seed=2)
+    res, (r1, r2) = replicate_stats((reps1, reps2), None, None, min_n=5, n_boot=100)
+    assert (res["delta"] > 0).all()
+    assert (res["p"] < 0.05).all()
+    assert (res["se_seed"] > 0).all() and (res["se_variant"] > 0).all()
+    assert r1.shape == (2, 4) and r2.shape == (2, 2)
+    np.testing.assert_allclose(r2.mean(axis=1) - r1.mean(axis=1), res["delta"])
+
+
+def test_replicate_stats_seed_noise_widens_the_test():
+    kw = dict(min_n=5, n_boot=100)
+    quiet, _ = replicate_stats((make_reps(3, seed_sd=0.01, seed=1),
+                             make_reps(3, edge=0.1, seed_sd=0.01, seed=2)), None, None, **kw)
+    noisy, _ = replicate_stats((make_reps(3, seed_sd=0.5, seed=1),
+                             make_reps(3, edge=0.1, seed_sd=0.5, seed=2)), None, None, **kw)
+    assert (noisy["se_seed"] > quiet["se_seed"]).all()
+
+
+def test_replicate_stats_cor_kind_and_single_replicate():
+    res, _ = replicate_stats((make_reps(1), make_reps(3, edge=0.8)), "REGION",
+                          ["TSS", "CDS"], kind="cor", min_n=5, n_boot=50)
+    assert list(res.index) == ["TSS", "CDS"]
+    assert res["p"].isna().all() and res["se_seed"].isna().all()
+    assert res["se_variant"].notna().all()
+
+
+@pytest.mark.parametrize("agg", ["mean", "median"])
+@pytest.mark.parametrize("shared_tissue", [False, True])
+def test_replicate_stats_cor_uses_shared_valid_cells(agg, shared_tissue):
+    x = np.arange(30, dtype=float)
+    df = pd.DataFrame(
+        {"label": "pos", "coef": x, "pred": -x},
+        index=[f"v{i}" for i in range(len(x))],
+    )
+    a = {"constant_in_one_replicate": df}
+    b = {"constant_in_one_replicate": df.assign(pred=0.0)}
+    if shared_tissue:
+        a["shared"] = b["shared"] = df.assign(pred=x)
+
+    res, vals = replicate_stats(
+        ([a, a], [a, b]), None, None, kind="cor", agg=agg, n_boot=30
+    )
+    if shared_tissue:
+        assert res.loc["all", "delta"] == 0
+        assert res.loc["all", "p"] == 1
+        for values in vals:
+            np.testing.assert_allclose(values, 1)
+    else:
+        assert res.isna().all().all()
+        assert all(values.isna().all().all() for values in vals)
+
+
+################################################################################
 # the collapsed flavor
 ################################################################################
 def test_collapse_stats_brackets_its_delta():
@@ -291,3 +366,66 @@ def test_tissue_unit_table_displays_the_requested_agg():
         for agg in ("median", "mean")
     }
     assert not np.allclose(tables["median"]["m1"], tables["mean"]["m1"])
+
+
+@pytest.mark.parametrize('kind', ['clf', 'cor'])
+@pytest.mark.parametrize('shared', [False, True])
+def test_weighted_cell_matches_expanded_samples(kind, shared):
+    from westminster.bootstrap import _prepare_cell
+
+    rng = np.random.default_rng(51)
+    y = rng.integers(0, 2, 40)
+    scores = rng.integers(-3, 4, (3, 40)).astype(float)
+    effects = rng.integers(-2, 3, (3, 40)).astype(float)
+    if shared:
+        effects[:] = effects[0]
+    evaluate = _prepare_cell(y, scores, effects if kind == 'cor' else None)
+    weights = [np.zeros(40, int), np.ones(40, int), y, 1 - y,
+               np.eye(1, 40, dtype=int)[0] * 3]
+    weights += [rng.integers(0, 5, 40) for _ in range(20)]
+    for w in weights:
+        idx = np.repeat(np.arange(40), w)
+        expected = np.full((3, 2 if kind == 'clf' else 1), np.nan)
+        for k in range(3):
+            if kind == 'clf' and np.unique(y[idx]).size == 2:
+                expected[k] = [roc_auc_score(y[idx], scores[k, idx]),
+                               average_precision_score(y[idx], scores[k, idx])]
+            elif kind == 'cor' and len(idx) > 1 and all(
+                    np.unique(a[idx]).size > 1 for a in (scores[k], effects[k])):
+                expected[k, 0] = spearmanr(scores[k, idx], effects[k, idx]).statistic
+        np.testing.assert_allclose(evaluate(w), expected, atol=1e-14, equal_nan=True)
+
+
+@pytest.mark.parametrize('kind', ['clf', 'cor'])
+@pytest.mark.parametrize('counts', [False, True])
+@pytest.mark.parametrize('col,edges,nan_bin', [(None, None, False),
+    ('REGION', ['TSS', 'CDS', 'missing'], True), ('dist', [0, 1, 3], False)])
+def test_prepared_cluster_matches_expanded_draws(kind, counts, col, edges, nan_bin):
+    from westminster.bootstrap import _cluster_rows, _cluster_setup
+
+    pools = make_pools(n_var=24, n_tissue=3, edge=0.3)
+    for k, pool in enumerate(pools):
+        for ti, (t, df) in enumerate(pool.items()):
+            df['pred'] = df.pred.round(0)
+            df['coef'] = (df.coef + k * df.pred).round(0)
+            df['dist'] = np.arange(len(df)) % 5
+            df.loc['v2', 'REGION'] = np.nan
+            df.loc['v4', 'pred'] = np.nan
+            pool[t] = df.iloc[ti:].iloc[::-1]
+    index, strata, cells, score = _cluster_setup(
+        pools, col, edges, nan_bin, kind, 'coef', 2, counts=counts)
+    _, cell, y, S, C = _cluster_rows(pools, col, edges, nan_bin, kind, 'coef')
+
+    def expanded(idx):
+        out = np.full((2, 2 if kind == 'clf' else 1, len(cells)), np.nan)
+        for j, c in enumerate(cells):
+            rows = idx[cell[idx] == c]
+            for k in range(2):
+                out[k, :, j] = (clf_metrics(y[rows], S[k, rows]) if kind == 'clf'
+                                else spearman(S[k, rows], C[k, rows]))
+        return out
+
+    actual = variant_bootstrap(index, strata, score, n_boot=40, seed=9, counts=counts)
+    expected = variant_bootstrap(index, strata, expanded, n_boot=40, seed=9)
+    for a, e in zip(actual, expected):
+        np.testing.assert_allclose(a, e, atol=1e-14, equal_nan=True)
