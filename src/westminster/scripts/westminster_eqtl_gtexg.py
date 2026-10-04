@@ -71,10 +71,10 @@ def main():
         "excluded from metrics.",
     )
     parser.add_argument(
-        "--smtsd",
+        "--coarse",
         action="store_true",
-        help="Match one merged per-SMTSD track per tissue, instead of the "
-        "coarse keywords. Requires merged GTEx targets.",
+        help="Average every GTEx track matching the coarse tissue keyword, "
+        "instead of the 1:1 per-SMTSD track when the targets have one.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("gtex_dir")
@@ -90,7 +90,7 @@ def main():
     egene_dist_rows = []
 
     tissues = discover_tissues(
-        f"{args.gtex_vcf_dir}/*_pos.vcf", "_pos.vcf", tissue_keywords(args.smtsd)
+        f"{args.gtex_vcf_dir}/*_pos.vcf", "_pos.vcf", tissue_keywords(args.coarse)
     )
     for tissue, keyword in tissues:
         if args.verbose:

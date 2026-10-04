@@ -1,6 +1,6 @@
 import pandas as pd
 
-from westminster.gtex import gtex_keywords, match_tissue_targets
+from westminster.gtex import gtex_keywords, match_tissue_targets, tissue_keywords
 
 # SMTS-described targets, as in every target set before the per-SMTSD merge
 OLD = ["heart"] * 3 + ["blood"] * 3 + ["blood_vessel"] * 3 + ["brain"] * 3
@@ -34,3 +34,18 @@ def test_merged_targets():
     assert matched(MERGED, "Artery_Tibial") == [4]
     assert matched(MERGED, "Heart_Left_Ventricle") == [0]
     assert matched(MERGED, "Whole_Blood") == [1]
+
+
+def test_default_prefers_smtsd():
+    def match(descriptions, tissue, coarse=False):
+        kw = tissue_keywords(coarse, txrev=True)[tissue]
+        return match_tissue_targets(targets(descriptions), kw).tolist()
+
+    merged = MERGED + ["brain_hippocampus"]
+    assert match(merged, "Brain_Cortex") == [5]
+    assert match(merged, "Brain_Cortex", coarse=True) == [5, 6]
+    # no SMTSD track: single-individual targets and txrev labels fall back
+    assert match(OLD, "Brain_Cortex") == [9, 10, 11]
+    assert match(OLD, "Artery_Tibial") == [6, 7, 8]
+    assert match(OLD, "brain_amygdala") == [9, 10, 11]
+

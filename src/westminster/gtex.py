@@ -126,7 +126,7 @@ gtex_keywords = {
 # Unlike gtex_keywords these are true matches: each Brain_* region hits its own
 # track rather than the 13-region average, and Artery_* hits an artery track
 # rather than heart. Against a single-individual target set they match nothing,
-# which is the intent -- that set cannot resolve SMTSD.
+# and tissue_keywords falls back to gtex_keywords.
 gtex_smtsd_keywords = {
     "Adipose_Subcutaneous": "adipose_subcutaneous",
     "Adipose_Visceral_Omentum": "adipose_visceral_omentum",
@@ -182,35 +182,45 @@ gtex_smtsd_keywords = {
 }
 
 
-def tissue_keywords(smtsd: bool = False, txrev: bool = False):
-    """Return the tissue -> target keyword map for a scoring pass.
+def tissue_keywords(coarse: bool = False, txrev: bool = False):
+    """Return the tissue -> target keywords map for a scoring pass.
+
+    Each tissue maps to a list of keywords in preference order, and
+    match_tissue_targets uses the first that hits any target: the 1:1 per-SMTSD
+    keyword, then the coarse one. Single-individual target sets and txrev labels
+    have no SMTSD track, so they get the coarse pool.
 
     Args:
-        smtsd (bool): Use the 1:1 per-SMTSD map instead of the coarse one.
-        txrev (bool): Also accept the txrev tissue labels. Only meaningful for
-            the coarse map; txrev labels have no SMTSD resolution, so under
-            smtsd they are left out and discover_tissues reports them skipped
-            rather than silently matching a coarse pool.
+        coarse (bool): Use only the coarse keywords.
+        txrev (bool): Also accept the txrev tissue labels (coarse only).
 
     Returns:
-        dict: tissue label -> keyword.
+        dict: tissue label -> list of keywords.
     """
-    if smtsd:
-        return dict(gtex_smtsd_keywords)
     keywords = {}
     if txrev:
         keywords.update(
-            {t.replace("GTEx_txrev_", ""): kw for t, kw in txrev_keywords.items()}
+            {t.replace("GTEx_txrev_", ""): [kw] for t, kw in txrev_keywords.items()}
         )
-    keywords.update(gtex_keywords)
+    for tissue, kw in gtex_keywords.items():
+        keywords[tissue] = [kw]
+        if not coarse:
+            keywords[tissue].insert(0, gtex_smtsd_keywords[tissue])
     return keywords
 
 
 def match_tissue_targets(targets_df, keyword, gene_targets=False, verbose=False):
     """Return array of target indices matching a GTEx tissue keyword.
 
-    A tuple keyword matches a target containing any of its members.
+    A tuple keyword matches a target containing any of its members. A list is
+    tried in order, and the first keyword matching any target wins.
     """
+    if isinstance(keyword, list):
+        for kw in keyword:
+            match_tis = match_tissue_targets(targets_df, kw, gene_targets, verbose)
+            if len(match_tis):
+                break
+        return match_tis
     keywords = (keyword,) if isinstance(keyword, str) else keyword
     target_ids = targets_df.identifier.values
     target_labels = targets_df.description.values

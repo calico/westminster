@@ -57,10 +57,10 @@ def main():
         help="SNP statistic. [Default: %(default)s]",
     )
     parser.add_argument(
-        "--smtsd",
+        "--coarse",
         action="store_true",
-        help="Match one merged per-SMTSD track per tissue, instead of the "
-        "coarse keywords. Requires merged GTEx targets.",
+        help="Average every GTEx track matching the coarse tissue keyword, "
+        "instead of the 1:1 per-SMTSD track when the targets have one.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("paqtl_dir")
@@ -68,7 +68,7 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
 
-    keyword_lookup = tissue_keywords(args.smtsd, txrev=True)
+    keyword_lookup = tissue_keywords(args.coarse, txrev=True)
 
     metrics_rows = []
 
