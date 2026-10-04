@@ -587,8 +587,9 @@ def replicate_stats(
 
     Each replicate's metric is its per-tissue values aggregated across tissues
     (`agg`), and each config's is the mean over its replicates, so a config
-    with more replicates gains no ensembling advantage. `delta` (config 2 -
-    config 1) carries two independent errors:
+    with more replicates gains no ensembling advantage. On the full data and
+    each draw, cells undefined for any replicate are excluded from all replicates.
+    `delta` (config 2 - config 1) carries two independent errors:
 
     - seed noise: s1^2/n1 + s2^2/n2 over the replicates on the full data, as in
       Welch's t. Replicates differ in which variants they get right, so this
@@ -622,7 +623,9 @@ def replicate_stats(
     )
 
     def statistic(idx):
-        return _bin_agg(score(idx), cells % nb, nb, agg)  # (n1 + n2, metrics, bins)
+        values = score(idx)
+        values = np.where(np.isfinite(values).all(axis=0), values, np.nan)
+        return _bin_agg(values, cells % nb, nb, agg)  # (n1 + n2, metrics, bins)
 
     point, boots = variant_bootstrap(index, strata, statistic, n_boot=n_boot, seed=seed, counts=True)
     a, b = point[:n1], point[n1:]

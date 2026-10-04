@@ -242,6 +242,32 @@ def test_replicate_stats_cor_kind_and_single_replicate():
     assert res["se_variant"].notna().all()
 
 
+@pytest.mark.parametrize("agg", ["mean", "median"])
+@pytest.mark.parametrize("shared_tissue", [False, True])
+def test_replicate_stats_cor_uses_shared_valid_cells(agg, shared_tissue):
+    x = np.arange(30, dtype=float)
+    df = pd.DataFrame(
+        {"label": "pos", "coef": x, "pred": -x},
+        index=[f"v{i}" for i in range(len(x))],
+    )
+    a = {"constant_in_one_replicate": df}
+    b = {"constant_in_one_replicate": df.assign(pred=0.0)}
+    if shared_tissue:
+        a["shared"] = b["shared"] = df.assign(pred=x)
+
+    res, vals = replicate_stats(
+        ([a, a], [a, b]), None, None, kind="cor", agg=agg, n_boot=30
+    )
+    if shared_tissue:
+        assert res.loc["all", "delta"] == 0
+        assert res.loc["all", "p"] == 1
+        for values in vals:
+            np.testing.assert_allclose(values, 1)
+    else:
+        assert res.isna().all().all()
+        assert all(values.isna().all().all() for values in vals)
+
+
 ################################################################################
 # the collapsed flavor
 ################################################################################
