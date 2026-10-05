@@ -94,6 +94,20 @@ def main():
         help="Output directory for tables and plots",
     )
     snp_group.add_argument(
+        "-m",
+        "--mix_dtype",
+        dest="mix_dtype",
+        default="float32",
+        choices=["float32", "bfloat16", "float16"],
+        help="Mixed precision dtype",
+    )
+    snp_group.add_argument(
+        "--compile",
+        default=False,
+        action="store_true",
+        help="Compile the model with torch.compile",
+    )
+    snp_group.add_argument(
         "--rc",
         dest="rc",
         default=False,
