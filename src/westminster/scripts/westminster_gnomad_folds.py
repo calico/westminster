@@ -13,7 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # =========================================================================
-from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+from argparse import (
+    ArgumentDefaultsHelpFormatter,
+    ArgumentParser,
+    BooleanOptionalAction,
+)
 import copy
 import itertools
 import os
@@ -92,9 +96,9 @@ def main():
     snp_group.add_argument(
         "--indel_stitch",
         dest="indel_stitch",
-        default=False,
-        action="store_true",
-        help="Stitch indel compensation shifts",
+        default=True,
+        action=BooleanOptionalAction,
+        help="Stitch the longer indel allele to align with the shorter",
     )
     snp_group.add_argument(
         "-n",
